@@ -37,6 +37,7 @@ import { Unsubscribe } from './pages/Unsubscribe';
 import { PublicDocumentVerification } from './pages/PublicDocumentVerification';
 import { ChatBot } from './components/ChatBot';
 import { ToastContainer } from './components/Toast';
+import { EntryTransition } from './components/EntryTransition';
 import { User, ToastMessage } from './types';
 
 function App() {
@@ -49,26 +50,43 @@ function App() {
   });
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(() => {
-    try {
-      return !localStorage.getItem('unsaac_auth_user');
-    } catch(e) {
-      return true;
-    }
-  });
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [showEntryTransition, setShowEntryTransition] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
+    const startTime = Date.now();
+    const minSplashDuration = 500; // Transición rápida, sobria y fluida estilo Spotify/Disney+
 
     // Initialize Supabase Keep-Alive & Auto-Reconnect system
     const cleanupKeepAlive = initKeepAliveSystem();
 
-    // Safety timeout: ensure loading spinner never blocks the user for more than 500ms
+    const finishAuth = () => {
+      const elapsed = Date.now() - startTime;
+      const remaining = Math.max(0, minSplashDuration - elapsed);
+      setTimeout(() => {
+        if (isMounted) {
+          setIsCheckingAuth(false);
+          // Limpieza preventiva si el elemento aún persistiera en el DOM
+          const staticEl = document.getElementById('unsaac-static-preloader');
+          if (staticEl) {
+            staticEl.style.opacity = '0';
+            setTimeout(() => staticEl.remove(), 450);
+          }
+        }
+      }, remaining);
+    };
+
+    // Safety timeout: asegura que bajo ninguna circunstancia el usuario quede bloqueado más de 1.8s
     const safetyTimeout = setTimeout(() => {
       if (isMounted) {
         setIsCheckingAuth(false);
+        const staticEl = document.getElementById('unsaac-static-preloader');
+        if (staticEl) {
+          staticEl.remove();
+        }
       }
-    }, 500);
+    }, 1800);
 
     const initAuth = () => {
       try {
@@ -103,9 +121,7 @@ function App() {
       } catch (err: any) {
         console.warn('Session check warning:', err);
       } finally {
-        if (isMounted) {
-          setIsCheckingAuth(false);
-        }
+        finishAuth();
       }
     };
 
@@ -147,14 +163,51 @@ function App() {
     } catch(e) {}
   };
 
-  if (isCheckingAuth) {
-    return <div className="flex h-screen items-center justify-center bg-slate-900"><span className="material-symbols-outlined animate-spin text-white text-4xl">progress_activity</span></div>;
-  }
+  // Mensajes contextuales según si es acceso por token (personal sorteado), QR (validación) o sistema
+  const getContextualTransition = () => {
+    try {
+      const path = (window.location.hash || '') + (window.location.pathname || '') + (window.location.search || '');
+      if (path.includes('staff-confirm')) {
+        return {
+          message: 'Cargando confirmación de sorteo...',
+          subMessage: 'Personal de Apoyo · Dirección de Admisión',
+        };
+      }
+      if (path.includes('validar') || path.includes('verificar')) {
+        return {
+          message: 'Consultando registro de autenticidad...',
+          subMessage: 'Portal de Validación Oficial · UNSAAC',
+        };
+      }
+      if (path.includes('unsubscribe')) {
+        return {
+          message: 'Gestionando suscripción...',
+          subMessage: 'Dirección de Admisión · UNSAAC',
+        };
+      }
+    } catch (e) {}
+    return {
+      message: user ? 'Iniciando sesión institucional...' : 'Iniciando plataforma institucional...',
+      subMessage: 'Dirección de Admisión · UNSAAC',
+    };
+  };
+
+  const transitionInfo = getContextualTransition();
 
   return (
-    <HashRouter>
-      <ToastContainer toasts={toasts} onClose={removeToast} />
-      {!user ? (
+    <>
+      {showEntryTransition && (
+        <EntryTransition
+          isReady={!isCheckingAuth}
+          onComplete={() => setShowEntryTransition(false)}
+          message={transitionInfo.message}
+          subMessage={transitionInfo.subMessage}
+        />
+      )}
+      {!isCheckingAuth && (
+        <HashRouter>
+          <ToastContainer toasts={toasts} onClose={removeToast} />
+        {!user ? (
         <Routes>
           <Route path="/login" element={<Login onLogin={(u) => { setUser(u); addToast(`Bienvenido, ${u.name}`); }} />} />
           <Route path="/staff-confirm" element={<StaffConfirmation />} />
@@ -276,6 +329,8 @@ function App() {
         </div>
       )}
     </HashRouter>
+    )}
+    </>
   );
 }
 

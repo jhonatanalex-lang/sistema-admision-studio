@@ -191,7 +191,7 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
 
         setFiles(Array.from(groupedMap.values()));
         
-        // Proteger el catálogo oficial de destinos para mantener una lista limpia sin absorber textos libres de la BD
+        // Proteger el catálogo oficial de destinos para que no absorba textos libres arbitrarios de la BD
         setDestinationList(DEFAULT_DESTINATIONS);
       }
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -385,7 +385,7 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
           if (isAdmin) {
               setIsCustomDestination(true);
           } else {
-              setDestinationList(prev => prev.includes(dest) ? prev : [...prev, dest].sort((a,b) => a.localeCompare(b)));
+              setDestinationList(prev => prev.includes(dest) ? prev : [...prev, dest].sort((a, b) => a.localeCompare(b)));
               setIsCustomDestination(false);
           }
       } else {

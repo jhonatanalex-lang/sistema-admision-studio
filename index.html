@@ -83,8 +83,164 @@
 
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" type="image/png" href="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" />
+    <link id="app-favicon" rel="icon" type="image/png" href="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" />
     <title>Dirección de Admisión · UNSAAC</title>
+
+    <!-- Configuración de Favicon e Identificación Dinámica por Entorno (Desarrollo / Producción) -->
+    <script>
+      (function() {
+        function setupDynamicFavicon() {
+          try {
+            var host = window.location.hostname || '';
+            var port = window.location.port || '';
+            var search = window.location.search || '';
+            
+            // Determinar si es entorno de desarrollo
+            var forceProd = search.indexOf('env=prod') !== -1;
+            var forceDev = search.indexOf('env=dev') !== -1;
+            var isDev = !forceProd && (
+              forceDev ||
+              host === 'localhost' ||
+              host === '127.0.0.1' ||
+              host === '0.0.0.0' ||
+              host.indexOf('dev') !== -1 ||
+              (port !== '' && port !== '80' && port !== '443')
+            );
+
+            var favicon = document.getElementById('app-favicon');
+            if (!favicon) {
+              favicon = document.querySelector("link[rel*='icon']");
+              if (favicon) {
+                favicon.id = 'app-favicon';
+              } else {
+                favicon = document.createElement('link');
+                favicon.id = 'app-favicon';
+                favicon.rel = 'icon';
+                document.head.appendChild(favicon);
+              }
+            }
+
+            // Título de pestaña distintivo
+            var baseTitle = 'Dirección de Admisión · UNSAAC';
+            if (isDev) {
+              if (!document.title.startsWith('[DEV] ')) {
+                document.title = '[DEV] ' + (document.title.replace(/^\[DEV\]\s*/, '') || baseTitle);
+              }
+            } else {
+              if (document.title.startsWith('[DEV] ')) {
+                document.title = document.title.replace(/^\[DEV\]\s*/, '') || baseTitle;
+              }
+            }
+
+            // Observador para mantener el prefijo [DEV] si las rutas de React cambian document.title
+            if (isDev && window.MutationObserver && !window.__devTitleObserverAttached) {
+              window.__devTitleObserverAttached = true;
+              var titleEl = document.querySelector('title');
+              if (titleEl) {
+                var titleObserver = new MutationObserver(function() {
+                  if (!document.title.startsWith('[DEV] ')) {
+                    document.title = '[DEV] ' + document.title;
+                  }
+                });
+                titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
+              }
+            }
+
+            if (isDev) {
+              // Favicon para Desarrollo: Escudo UNSAAC con distintivo sutil 'DEV' en ámbar institucional
+              var devSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">' +
+                '<rect width="64" height="64" rx="14" fill="#090d16"/>' +
+                '<rect x="2" y="2" width="60" height="60" rx="12" fill="none" stroke="#e8a134" stroke-width="2.5" stroke-opacity="0.8"/>' +
+                '<path d="M32 9 L49 15 V33 C49 44 32 53 32 53 C32 53 15 44 15 33 V15 Z" fill="#9b192d" stroke="#e8a134" stroke-width="2.5"/>' +
+                '<path d="M32 15 L43 20 V31 C43 39 32 46 32 46 C32 46 21 39 21 31 V20 Z" fill="#7b1523"/>' +
+                '<circle cx="32" cy="27" r="4.5" fill="#e8a134"/>' +
+                '<rect x="26" y="42" width="36" height="19" rx="5" fill="#f59e0b" stroke="#090d16" stroke-width="2"/>' +
+                '<text x="44" y="55.5" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="10.5" font-weight="900" fill="#090d16" text-anchor="middle" letter-spacing="0.5">DEV</text>' +
+                '</svg>';
+
+              favicon.type = 'image/svg+xml';
+              favicon.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(devSvg);
+
+              // Enriquecer con el isotipo oficial bitmap si carga correctamente
+              var img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.src = '/logo_admision.png';
+              img.onload = function() {
+                try {
+                  var canvas = document.createElement('canvas');
+                  canvas.width = 64;
+                  canvas.height = 64;
+                  var ctx = canvas.getContext('2d');
+                  if (!ctx) return;
+
+                  ctx.fillStyle = '#090d16';
+                  if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(0, 0, 64, 64, 14);
+                    ctx.fill();
+                    ctx.lineWidth = 2.5;
+                    ctx.strokeStyle = '#e8a134';
+                    ctx.stroke();
+                  } else {
+                    ctx.fillRect(0, 0, 64, 64);
+                  }
+
+                  ctx.drawImage(img, 7, 6, 50, 50);
+
+                  ctx.fillStyle = '#f59e0b';
+                  ctx.strokeStyle = '#090d16';
+                  ctx.lineWidth = 2;
+                  if (ctx.roundRect) {
+                    ctx.beginPath();
+                    ctx.roundRect(26, 42, 36, 19, 5);
+                    ctx.fill();
+                    ctx.stroke();
+                  } else {
+                    ctx.fillRect(26, 42, 36, 19);
+                    ctx.strokeRect(26, 42, 36, 19);
+                  }
+
+                  ctx.fillStyle = '#090d16';
+                  ctx.font = '900 11px system-ui, -apple-system, sans-serif';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText('DEV', 44, 52);
+
+                  favicon.type = 'image/png';
+                  favicon.href = canvas.toDataURL('image/png');
+                } catch (e) {
+                  // Fallback vector SVG ya se encuentra aplicado
+                }
+              };
+            } else {
+              // Favicon Producción: Escudo oficial limpio sin etiquetas
+              favicon.type = 'image/png';
+              favicon.href = 'https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png';
+            }
+          } catch (e) {
+            console.warn('No se pudo inicializar favicon dinámico:', e);
+          }
+        }
+
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', setupDynamicFavicon);
+        } else {
+          setupDynamicFavicon();
+        }
+
+        window.__setFaviconEnvironment = function(mode) {
+          var url = new URL(window.location.href);
+          if (mode === 'dev') {
+            url.searchParams.set('env', 'dev');
+          } else {
+            url.searchParams.set('env', 'prod');
+          }
+          window.history.replaceState(null, '', url.toString());
+          setupDynamicFavicon();
+        };
+      })();
+    </script>
+
     <!-- Google Fonts: Cinzel & Poppins (Identidad Gráfica UNSAAC) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -124,6 +280,11 @@
       };
     </script>
     <style>
+        html, body {
+            background-color: #090d16;
+            margin: 0;
+            padding: 0;
+        }
         body {
             font-family: 'Poppins', sans-serif;
         }
@@ -194,10 +355,90 @@
                 border-color: #cbd5e1 !important;
             }
         }
+
+        /* Animaciones para el preloader sobrio y minimalista de inicio */
+        @keyframes unsaacEnter {
+            0% {
+                opacity: 0;
+                transform: scale(0.96);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        @keyframes unsaacMinimalBar {
+            0% {
+                transform: translateX(-100%);
+            }
+            50% {
+                transform: translateX(100%);
+            }
+            100% {
+                transform: translateX(300%);
+            }
+        }
     </style>
-    <link rel="stylesheet" href="/index.css">
   </head>
-  <body class="bg-background-light text-slate-900 antialiased">
+  <body style="margin:0;background-color:#090d16;" class="text-slate-900 antialiased">
+    <!-- Preloader Nativo Sobrio y Minimalista (0ms) - Ubicado fuera de #root para transición sin parpadeo blanco -->
+    <div id="unsaac-static-preloader" style="position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#090d16;color:#fff;overflow:hidden;font-family:'Poppins',-apple-system,BlinkMacSystemFont,sans-serif;user-select:none;transition:opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1);will-change:opacity;">
+      <div style="display:flex;flex-direction:column;align-items:center;animation:unsaacEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;">
+        <!-- Emblema oficial enmarcado con sobriedad -->
+        <div style="margin-bottom:24px;display:flex;align-items:center;justify-content:center;">
+          <div style="width:104px;height:104px;border-radius:18px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;padding:14px;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+            <img src="/logo_admision.png" onerror="if(!this.src.includes('googleusercontent'))this.src='https://lh3.googleusercontent.com/d/1yN0_dziHYCbHPOnDb1Y7qYvHno-mUY7M';" alt="Admisión UNSAAC" style="width:100%;height:100%;object-fit:contain;" />
+          </div>
+        </div>
+
+        <!-- Tipografía institucional limpia -->
+        <div style="display:flex;flex-direction:column;align-items:center;text-align:center;padding:0 16px;">
+          <span style="font-size:11px;font-weight:500;letter-spacing:0.25em;color:#94a3b8;text-transform:uppercase;">
+            UNSAAC
+          </span>
+          <h1 style="font-size:19px;font-weight:600;letter-spacing:0.14em;color:#ffffff;text-transform:uppercase;margin:4px 0 0 0;">
+            Dirección de Admisión
+          </h1>
+        </div>
+
+        <!-- Micro-línea de progreso minimalista (2px) -->
+        <div style="margin-top:32px;display:flex;flex-direction:column;align-items:center;gap:10px;">
+          <div style="width:128px;height:2px;background:rgba(255,255,255,0.1);border-radius:999px;overflow:hidden;">
+            <div style="height:100%;width:35%;background:rgba(255,255,255,0.85);border-radius:999px;animation:unsaacMinimalBar 1.2s ease-in-out infinite;"></div>
+          </div>
+          <p id="unsaac-preloader-text" style="font-size:11px;font-weight:400;letter-spacing:0.04em;color:#64748b;margin:0;">
+            Iniciando plataforma...
+          </p>
+        </div>
+      </div>
+
+      <!-- Pie de pantalla institucional sobrio -->
+      <div style="position:absolute;bottom:24px;font-size:10px;letter-spacing:0.12em;color:#475569;font-family:monospace;">
+        SISTEMA DE GESTIÓN DE ADMISIÓN
+      </div>
+    </div>
+
+    <script>
+      // Detección contextual instantánea (0ms) para enlaces con tokens o códigos QR
+      (function() {
+        try {
+          var raw = (window.location.href || '') + (window.location.hash || '');
+          var label = document.getElementById('unsaac-preloader-text');
+          if (label) {
+            if (raw.indexOf('staff-confirm') !== -1) {
+              label.textContent = 'Cargando confirmación de sorteo...';
+            } else if (raw.indexOf('validar') !== -1 || raw.indexOf('verificar') !== -1) {
+              label.textContent = 'Consultando autenticidad de documento...';
+            } else if (raw.indexOf('unsubscribe') !== -1) {
+              label.textContent = 'Gestionando suscripción...';
+            }
+          }
+        } catch(e) {}
+      })();
+    </script>
+
+    <!-- Contenedor React independiente -->
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

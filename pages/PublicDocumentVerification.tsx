@@ -149,12 +149,25 @@ export const PublicDocumentVerification: React.FC = () => {
 
         {/* Loading State */}
         {loading && (
-          <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
-            <span className="material-symbols-outlined text-4xl text-[#7b1523] animate-spin mb-3">
-              progress_activity
-            </span>
-            <h3 className="text-base font-semibold text-slate-800">Consultando Registro Oficial...</h3>
-            <p className="text-xs text-slate-500 mt-1">Validando hash y firma electrónica en los servidores de la Dirección de Admisión.</p>
+          <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center shadow-xs flex flex-col items-center justify-center">
+            <div className="w-20 h-20 rounded-2xl bg-slate-900/[0.03] border border-slate-200 flex items-center justify-center p-3 shadow-sm mb-4">
+              <img
+                src="/logo_admision.png"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  if (!target.src.includes('googleusercontent')) {
+                    target.src = 'https://lh3.googleusercontent.com/d/1yN0_dziHYCbHPOnDb1Y7qYvHno-mUY7M';
+                  }
+                }}
+                alt="Admisión UNSAAC"
+                className="w-full h-full object-contain filter drop-shadow-xs"
+              />
+            </div>
+            <h3 className="text-base font-semibold text-slate-800 tracking-tight">Consultando Registro Oficial...</h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-sm">Validando hash criptográfico y firmas institucionales en los servidores de la Dirección de Admisión.</p>
+            <div className="w-36 h-[2px] bg-slate-200 rounded-full overflow-hidden mt-5">
+              <div className="h-full w-1/3 bg-[#7b1523] rounded-full animate-pulse" />
+            </div>
           </div>
         )}
 

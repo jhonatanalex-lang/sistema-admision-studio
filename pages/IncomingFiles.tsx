@@ -56,6 +56,23 @@ interface GroupedIncomingFile extends IncomingFile {
   };
 }
 
+export interface MatchingAdmission {
+  id: string;
+  NOMBRE: string;
+  CARRERA: string;
+  MODALIDAD: string;
+  SEMESTRE: string;
+  ANIO: string;
+  CODPOSTULANTE: string;
+  isCurrent: boolean;
+  matchReason: string;
+}
+
+export const isRectificationTemplate = (templateName?: string, subject?: string) => {
+  const text = `${templateName || ''} ${subject || ''}`.toUpperCase();
+  return text.includes('RECTIFICACIÓN') || text.includes('RECTIFICACION') || text.includes('INCLUSIÓN') || text.includes('INCLUSION');
+};
+
 export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) => {
   const navigate = useNavigate();
   const [files, setFiles] = useState<GroupedIncomingFile[]>([]);
@@ -73,6 +90,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   const [isAttendModalOpen, setIsAttendModalOpen] = useState(false);
   const [fileToAttend, setFileToAttend] = useState<IncomingFile | null>(null);
   const [attendStep, setAttendStep] = useState(1);
+
+  // States for Propagated Rectification (Human-in-the-Loop)
+  const [matchingAdmissions, setMatchingAdmissions] = useState<MatchingAdmission[]>([]);
+  const [selectedAdmissionIds, setSelectedAdmissionIds] = useState<string[]>([]);
+  const [isLoadingAdmissions, setIsLoadingAdmissions] = useState(false);
+  const [customSearchAdmissionTerm, setCustomSearchAdmissionTerm] = useState('');
+  const [showExtraSearch, setShowExtraSearch] = useState(false);
   
   // General Flow States
   const [studentQuery, setStudentQuery] = useState('');
@@ -824,6 +848,11 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       setSelectedTemplate(null);
       setManualValues({});
       setDetectedVariables([]);
+      setMatchingAdmissions([]);
+      setSelectedAdmissionIds([]);
+      setIsLoadingAdmissions(false);
+      setCustomSearchAdmissionTerm('');
+      setShowExtraSearch(false);
       
       // Reset Payment Flow
       setPaymentCandidates([]);
@@ -930,6 +959,157 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       return `INFORME ${(maxSeq + 1).toString().padStart(3, '0')}-${currentYear}`;
   };
 
+  const searchPriorAdmissions = async (student: Participant) => {
+      if (!student) return;
+      setIsLoadingAdmissions(true);
+      try {
+          const list: MatchingAdmission[] = [];
+          const addedIds = new Set<string>();
+
+          // 1. Siempre incluir el registro actual atendido
+          list.push({
+              id: student.id,
+              NOMBRE: student.NOMBRE,
+              CARRERA: student.CARRERA,
+              MODALIDAD: student.MODALIDAD,
+              SEMESTRE: student.SEMESTRE,
+              ANIO: student.ANIO,
+              CODPOSTULANTE: student.CODPOSTULANTE,
+              isCurrent: true,
+              matchReason: 'Expediente en atención'
+          });
+          addedIds.add(student.id);
+
+          // 2. Buscar por coincidencia del nombre original en 'participantes'
+          if (student.NOMBRE && student.NOMBRE.trim()) {
+              const { data: byName } = await supabase
+                  .from('participantes')
+                  .select('id, NOMBRE, CARRERA, MODALIDAD, SEMESTRE, ANIO, CODPOSTULANTE')
+                  .ilike('NOMBRE', student.NOMBRE.trim())
+                  .limit(30);
+
+              (byName || []).forEach((row: any) => {
+                  if (!addedIds.has(row.id)) {
+                      addedIds.add(row.id);
+                      list.push({
+                          id: row.id,
+                          NOMBRE: row.NOMBRE,
+                          CARRERA: row.CARRERA,
+                          MODALIDAD: row.MODALIDAD,
+                          SEMESTRE: row.SEMESTRE,
+                          ANIO: row.ANIO,
+                          CODPOSTULANTE: row.CODPOSTULANTE,
+                          isCurrent: false,
+                          matchReason: 'Mismo nombre registrado'
+                      });
+                  }
+              });
+          }
+
+          // 3. Si CODPOSTULANTE es un DNI de 8 dígitos válido, buscar también por DNI
+          const isStrictDni = /^\d{8}$/.test(String(student.CODPOSTULANTE || '').trim());
+          if (isStrictDni) {
+              const { data: byDni } = await supabase
+                  .from('participantes')
+                  .select('id, NOMBRE, CARRERA, MODALIDAD, SEMESTRE, ANIO, CODPOSTULANTE')
+                  .eq('CODPOSTULANTE', String(student.CODPOSTULANTE).trim())
+                  .limit(30);
+
+              (byDni || []).forEach((row: any) => {
+                  if (!addedIds.has(row.id)) {
+                      addedIds.add(row.id);
+                      list.push({
+                          id: row.id,
+                          NOMBRE: row.NOMBRE,
+                          CARRERA: row.CARRERA,
+                          MODALIDAD: row.MODALIDAD,
+                          SEMESTRE: row.SEMESTRE,
+                          ANIO: row.ANIO,
+                          CODPOSTULANTE: row.CODPOSTULANTE,
+                          isCurrent: false,
+                          matchReason: 'Mismo DNI (8 dígitos)'
+                      });
+                  }
+              });
+          }
+
+          setMatchingAdmissions(list);
+          // Por defecto marcar todos para rectificación
+          setSelectedAdmissionIds(list.map(item => item.id));
+      } catch (err) {
+          console.error('Error buscando admisiones para rectificación:', err);
+      } finally {
+          setIsLoadingAdmissions(false);
+      }
+  };
+
+  const handleManualSearchAdmissions = async () => {
+      if (!customSearchAdmissionTerm.trim()) return;
+      const term = customSearchAdmissionTerm.trim();
+      setIsLoadingAdmissions(true);
+      try {
+          const isDni = /^\d{8}$/.test(term);
+          let query = supabase.from('participantes').select('id, NOMBRE, CARRERA, MODALIDAD, SEMESTRE, ANIO, CODPOSTULANTE');
+          if (isDni) {
+              query = query.eq('CODPOSTULANTE', term);
+          } else {
+              query = query.or(`NOMBRE.ilike.%${term}%,CODPOSTULANTE.eq.${term}`);
+          }
+          const { data } = await query.limit(20);
+          if (data && data.length > 0) {
+              setMatchingAdmissions(prev => {
+                  const existingIds = new Set(prev.map(p => p.id));
+                  const newItems: MatchingAdmission[] = [];
+                  data.forEach((row: any) => {
+                      if (!existingIds.has(row.id)) {
+                          existingIds.add(row.id);
+                          newItems.push({
+                              id: row.id,
+                              NOMBRE: row.NOMBRE,
+                              CARRERA: row.CARRERA,
+                              MODALIDAD: row.MODALIDAD,
+                              SEMESTRE: row.SEMESTRE,
+                              ANIO: row.ANIO,
+                              CODPOSTULANTE: row.CODPOSTULANTE,
+                              isCurrent: row.id === selectedStudent?.id,
+                              matchReason: 'Búsqueda manual'
+                          });
+                      }
+                  });
+                  const combined = [...prev, ...newItems];
+                  setSelectedAdmissionIds(prevSel => [
+                      ...prevSel,
+                      ...newItems.map(item => item.id)
+                  ]);
+                  return combined;
+              });
+              setCustomSearchAdmissionTerm('');
+              if (notify) notify(`Se añadieron ${data.length} registro(s) a la lista.`, 'info');
+          } else {
+              if (notify) notify('No se encontraron ingresos con ese criterio.', 'info');
+          }
+      } catch (err: any) {
+          console.error('Error en búsqueda manual de admisiones:', err);
+          if (notify) notify('Error al buscar ingresos: ' + err.message, 'error');
+      } finally {
+          setIsLoadingAdmissions(false);
+      }
+  };
+
+  const toggleAdmissionSelection = (id: string) => {
+      setSelectedAdmissionIds(prev =>
+          prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+      );
+  };
+
+  const selectAllAdmissions = () => {
+      setSelectedAdmissionIds(matchingAdmissions.map(item => item.id));
+  };
+
+  const deselectAllAdmissions = () => {
+      setSelectedAdmissionIds([]);
+  };
+
   const prepareManualDataStep = async () => {
       if (!selectedTemplate) return;
       
@@ -948,6 +1128,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       ];
       // Las variables de usuario y QR nunca deben solicitarse al usuario como campos manuales
       const manualVars = uniqueVars.filter((v: string) => !systemVars.includes(v));
+
+      const isRect = isRectificationTemplate(selectedTemplate?.name, fileToAttend?.subject);
+
+      // Si es plantilla o trámite de rectificación e inclusión, asegurar que NOMBRECORRE esté presente
+      if (isRect && !manualVars.includes('NOMBRECORRE')) {
+          manualVars.push('NOMBRECORRE');
+      }
       
       setDetectedVariables(manualVars);
 
@@ -958,7 +1145,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           preFilledValues['INFORME'] = await getNextReportNumber();
       }
       
-      if (manualVars.includes('NOMBRECORRE') && selectedStudent) {
+      if ((manualVars.includes('NOMBRECORRE') || isRect) && selectedStudent) {
           preFilledValues['NOMBRECORRE'] = selectedStudent.NOMBRE;
       }
 
@@ -972,6 +1159,12 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       }
 
       setManualValues(prev => ({ ...prev, ...preFilledValues }));
+
+      // Si es rectificación o se incluye NOMBRECORRE, buscar ingresos previos del estudiante
+      if ((isRect || manualVars.includes('NOMBRECORRE')) && selectedStudent) {
+        await searchPriorAdmissions(selectedStudent);
+      }
+
       setAttendStep(4);
   };
 
@@ -1079,6 +1272,12 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           const escapedKey = `{{${key}}}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           content = content.replace(new RegExp(escapedKey, 'g'), value || '');
       });
+
+      if (manualValues['NOMBRECORRE']) {
+          content = content
+              .replace(/{{NOMBRE_CORRECTO}}/gi, manualValues['NOMBRECORRE'])
+              .replace(/{{NOMBRE_RECTIFICADO}}/gi, manualValues['NOMBRECORRE']);
+      }
 
       // 3. Garantizar justificación profesional y elegante del cuerpo del documento
       content = content.replace(/text-align\s*:\s*justify/gi, 'text-align: justify; text-justify: inter-word;');
@@ -1347,9 +1546,14 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               const issuedDocNumber = manualValues['INFORME'] || manualValues['CONSTANCIA'] || (qrInfo?.code ? qrInfo.code : `INF-${fileToAttend.number}`);
               const initials = getUserInitials(user);
 
+              const hasCorrectedName = Boolean(manualValues['NOMBRECORRE'] && manualValues['NOMBRECORRE'].trim());
+              const studentFinalName = hasCorrectedName ? manualValues['NOMBRECORRE'].trim().toUpperCase() : selectedStudent.NOMBRE;
+
               const destinationMeta = {
                 tipo_documento: issuedDocType,
-                estudiante_nombre: selectedStudent?.NOMBRE || '',
+                estudiante_nombre: studentFinalName,
+                estudiante_nombre_original: selectedStudent?.NOMBRE || '',
+                estudiante_nombre_corregido: hasCorrectedName ? manualValues['NOMBRECORRE'].trim().toUpperCase() : '',
                 estudiante_dni: selectedStudent?.CODPOSTULANTE || '',
                 estudiante_codigo: selectedStudent?.CODPOSTULANTE || '',
                 carrera: selectedStudent?.CARRERA || '',
@@ -1366,7 +1570,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                   doc_type: issuedDocType,
                   doc_number: issuedDocNumber,
                   ref_number: fileToAttend.number,
-                  subject: `${issuedDocType} - ${selectedStudent?.NOMBRE || fileToAttend.subject}`,
+                  subject: `${issuedDocType} - ${studentFinalName || fileToAttend.subject}`,
                   destination: JSON.stringify(destinationMeta),
                   status: 'Finalizado',
                   pdf_url: urlData.publicUrl,
@@ -1377,7 +1581,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               try {
                 await logEmissionAction(
                   issuedDocType,
-                  selectedStudent?.NOMBRE || 'ESTUDIANTE',
+                  studentFinalName || 'ESTUDIANTE',
                   selectedStudent?.CODPOSTULANTE || 'S/DNI',
                   issuedDocNumber,
                   fileToAttend.number,
@@ -1385,6 +1589,54 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 );
               } catch (auditErr) {
                 console.warn('Error al registrar auditoría de informe:', auditErr);
+              }
+
+              // 4.b Propagación de Rectificación a 'participantes' (Human-in-the-Loop)
+              const isRect = isRectificationTemplate(selectedTemplate?.name, fileToAttend.subject) || Boolean(manualValues['NOMBRECORRE']);
+              const correctedName = (manualValues['NOMBRECORRE'] || '').trim().toUpperCase();
+
+              if (isRect && correctedName && selectedAdmissionIds.length > 0) {
+                  const originalName = selectedStudent.NOMBRE;
+                  try {
+                      const { error: updateError } = await supabase
+                          .from('participantes')
+                          .update({ NOMBRE: correctedName })
+                          .in('id', selectedAdmissionIds);
+
+                      if (updateError) {
+                          console.error('Error al actualizar participantes:', updateError);
+                          if (notify) notify(`Aviso: Error al propagar nombre a participantes: ${updateError.message}`, 'warning');
+                      } else {
+                          if (selectedAdmissionIds.includes(selectedStudent.id)) {
+                              setSelectedStudent(prev => prev ? ({ ...prev, NOMBRE: correctedName }) : null);
+                          }
+
+                          await logAuditEvent({
+                              action_type: 'Edición',
+                              module: 'Mesa de Partes',
+                              description: `Rectificación de nombre en padrón oficial ('participantes'): "${originalName}" ➔ "${correctedName}" en ${selectedAdmissionIds.length} ingreso(s) seleccionado(s).`,
+                              user_name: user?.name,
+                              user_role: user?.role,
+                              expediente_id: fileToAttend.number,
+                              reference_id: selectedStudent.id,
+                              metadata: {
+                                  tipo_tramite: 'Rectificación / Inclusión de Datos',
+                                  nombre_original: originalName,
+                                  nombre_nuevo: correctedName,
+                                  impacted_participantes_ids: selectedAdmissionIds,
+                                  total_impactados: selectedAdmissionIds.length,
+                                  expediente_numero: fileToAttend.number,
+                                  plantilla: selectedTemplate?.name || 'INFORME DE RECTIFICACIÓN DE DATOS'
+                              }
+                          });
+
+                          if (notify) {
+                              notify(`Padrón de ingresantes rectificado con éxito (${selectedAdmissionIds.length} ingreso(s) actualizado(s)).`, 'success');
+                          }
+                      }
+                  } catch (rectErr: any) {
+                      console.error('Error en proceso de rectificación:', rectErr);
+                  }
               }
           }
 
@@ -1455,6 +1707,10 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           }
 
           setIsAttendModalOpen(false);
+          setMatchingAdmissions([]);
+          setSelectedAdmissionIds([]);
+          setIsLoadingAdmissions(false);
+          setCustomSearchAdmissionTerm('');
           fetchFiles();
 
       } catch (err: any) {
@@ -2194,12 +2450,12 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
 
                             {attendStep === 4 && (
                                 <div className="flex h-full gap-8 animate-in slide-in-from-right-5 duration-300">
-                                    {/* COLUMNA IZQUIERDA: DATOS MANUALES */}
-                                    <div className="w-1/3 flex flex-col gap-6 overflow-y-auto pr-2">
+                                    {/* COLUMNA IZQUIERDA: DATOS MANUALES Y RECTIFICACIÓN ASISTIDA */}
+                                    <div className="w-[440px] shrink-0 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar">
                                         <div className="flex flex-col gap-2">
                                             <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Paso 4: Completar Datos</p>
-                                            <h3 className="font-bold text-slate-800 text-lg leading-tight">Datos Faltantes</h3>
-                                            <p className="text-xs text-slate-500">Complete los campos que no se encontraron en la base de datos.</p>
+                                            <h3 className="font-bold text-slate-800 text-lg leading-tight">Datos Faltantes y Rectificación</h3>
+                                            <p className="text-xs text-slate-500">Complete las variables del documento y verifique los ingresos del estudiante.</p>
                                         </div>
 
                                         <div className="flex flex-col gap-4">
@@ -2211,15 +2467,190 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                             ) : (
                                                 detectedVariables.map(variable => (
                                                     <label key={variable} className="flex flex-col gap-1.5">
-                                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">{variable}</span>
+                                                        <div className="flex items-center justify-between ml-1">
+                                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{variable}</span>
+                                                            {variable === 'NOMBRECORRE' && (
+                                                                <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                                                    Nombre Rectificado
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <input 
                                                             value={manualValues[variable] || ''}
                                                             onChange={e => setManualValues(prev => ({...prev, [variable]: e.target.value}))}
-                                                            className="h-12 px-4 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:bg-white focus:border-primary outline-none transition-all"
+                                                            className={`h-12 px-4 rounded-xl border ${
+                                                                variable === 'NOMBRECORRE' 
+                                                                    ? 'border-primary/50 bg-primary/[0.02] focus:border-primary font-black uppercase text-primary' 
+                                                                    : 'border-slate-200 bg-slate-50 font-bold text-slate-800 focus:bg-white focus:border-primary'
+                                                            } text-sm outline-none transition-all`}
                                                             placeholder={`Ingrese ${variable}...`}
                                                         />
                                                     </label>
                                                 ))
+                                            )}
+
+                                            {/* Tarjeta Compacta: Actualizar en Padrón de Ingresantes */}
+                                            {(isRectificationTemplate(selectedTemplate?.name, fileToAttend?.subject) || detectedVariables.includes('NOMBRECORRE') || manualValues['NOMBRECORRE'] !== undefined) && (
+                                                <div className="flex flex-col gap-2 p-3 rounded-xl border border-slate-200/90 bg-slate-50/50">
+                                                    {/* Cabecera Compacta */}
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="material-symbols-outlined text-emerald-600 text-base">how_to_reg</span>
+                                                            <span className="text-xs font-bold text-slate-700">Actualizar en Padrón de Ingresantes</span>
+                                                            {matchingAdmissions.length > 0 && (
+                                                                <span className="text-[10px] font-medium text-slate-400">
+                                                                    ({selectedAdmissionIds.length}/{matchingAdmissions.length})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        {matchingAdmissions.length > 1 && (
+                                                            <div className="flex items-center gap-1.5 text-[10px]">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={selectAllAdmissions}
+                                                                    disabled={isLoadingAdmissions}
+                                                                    className="text-emerald-700 hover:text-emerald-800 font-semibold"
+                                                                >
+                                                                    Todos
+                                                                </button>
+                                                                <span className="text-slate-300">•</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={deselectAllAdmissions}
+                                                                    disabled={isLoadingAdmissions}
+                                                                    className="text-slate-400 hover:text-slate-600"
+                                                                >
+                                                                    Ninguno
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Previsualización en una sola línea del cambio de nombre */}
+                                                    <div className="flex items-center gap-1.5 text-[11px] px-2 py-1 bg-white rounded border border-slate-200/70">
+                                                        <span className="text-slate-400 text-[10px] font-bold uppercase tracking-wider shrink-0">Nombre:</span>
+                                                        <span className="text-slate-400 line-through truncate max-w-[150px]" title={selectedStudent?.NOMBRE}>
+                                                            {selectedStudent?.NOMBRE}
+                                                        </span>
+                                                        <span className="text-slate-300">➔</span>
+                                                        <span className={`font-semibold uppercase truncate ${manualValues['NOMBRECORRE']?.trim() ? 'text-emerald-700' : 'text-slate-400 italic'}`} title={manualValues['NOMBRECORRE'] || ''}>
+                                                            {manualValues['NOMBRECORRE']?.trim() ? manualValues['NOMBRECORRE'].trim().toUpperCase() : '(Escriba en NOMBRECORRE)'}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Lista Compacta en Una Sola Línea por Fila */}
+                                                    {isLoadingAdmissions ? (
+                                                        <div className="flex items-center justify-center py-2.5 bg-white rounded-lg border border-slate-100 text-slate-400 text-xs font-medium gap-1.5">
+                                                            <span className="material-symbols-outlined animate-spin text-sm">progress_activity</span>
+                                                            Buscando ingresos asociados...
+                                                        </div>
+                                                    ) : matchingAdmissions.length === 0 ? (
+                                                        <div className="py-2 px-2.5 bg-white rounded-lg border border-slate-200/80 text-slate-400 text-[11px] text-center">
+                                                            No se encontraron otros ingresos asociados.
+                                                        </div>
+                                                    ) : (
+                                                        <div className="max-h-40 overflow-y-auto divide-y divide-slate-100 bg-white rounded-lg border border-slate-200/80 custom-scrollbar">
+                                                            {matchingAdmissions.map(adm => {
+                                                                const isSelected = selectedAdmissionIds.includes(adm.id);
+                                                                return (
+                                                                    <label
+                                                                        key={adm.id}
+                                                                        className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer select-none text-[11px] transition-colors ${
+                                                                            isSelected ? 'bg-emerald-50/30' : 'hover:bg-slate-50/70 opacity-60'
+                                                                        }`}
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isSelected}
+                                                                            onChange={() => toggleAdmissionSelection(adm.id)}
+                                                                            className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 focus:ring-0 cursor-pointer shrink-0"
+                                                                        />
+
+                                                                        {/* Carrera Principal */}
+                                                                        <span className={`font-bold uppercase truncate flex-1 min-w-0 ${isSelected ? 'text-slate-700' : 'text-slate-500'}`} title={adm.CARRERA}>
+                                                                            {adm.CARRERA}
+                                                                        </span>
+
+                                                                        {/* Semestre / Año */}
+                                                                        <span className="shrink-0 text-[10px] font-semibold text-slate-500">
+                                                                            {adm.ANIO}-{adm.SEMESTRE}
+                                                                        </span>
+
+                                                                        {/* Modalidad (discreta) */}
+                                                                        {adm.MODALIDAD && (
+                                                                            <span className="shrink-0 text-[10px] text-slate-400 max-w-[110px] truncate hidden sm:inline" title={adm.MODALIDAD}>
+                                                                                • {adm.MODALIDAD}
+                                                                            </span>
+                                                                        )}
+
+                                                                        {/* Código de postulante */}
+                                                                        {adm.CODPOSTULANTE && (
+                                                                            <span className="shrink-0 text-[10px] font-mono text-slate-400">
+                                                                                Cód: {adm.CODPOSTULANTE}
+                                                                            </span>
+                                                                        )}
+
+                                                                        {/* Badge 'Actual' */}
+                                                                        {adm.isCurrent && (
+                                                                            <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                                                                                Actual
+                                                                            </span>
+                                                                        )}
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Búsqueda manual colapsable y discreta */}
+                                                    {!showExtraSearch ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setShowExtraSearch(true)}
+                                                            className="text-[10px] text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors self-start pl-0.5 pt-0.5"
+                                                        >
+                                                            <span className="material-symbols-outlined text-[13px]">person_search</span>
+                                                            <span>Buscar otro ingreso por DNI o Nombre</span>
+                                                        </button>
+                                                    ) : (
+                                                        <div className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col gap-1.5">
+                                                            <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
+                                                                <span>Buscar registro adicional:</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setShowExtraSearch(false)}
+                                                                    className="hover:text-slate-600 font-bold"
+                                                                >
+                                                                    Cerrar
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex gap-1.5">
+                                                                <input
+                                                                    type="text"
+                                                                    value={customSearchAdmissionTerm}
+                                                                    onChange={e => setCustomSearchAdmissionTerm(e.target.value)}
+                                                                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleManualSearchAdmissions(); } }}
+                                                                    placeholder="DNI o Nombre..."
+                                                                    className="flex-1 h-7 px-2 rounded border border-slate-200 bg-slate-50 text-[11px] text-slate-700 focus:bg-white focus:border-emerald-500 outline-none"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={handleManualSearchAdmissions}
+                                                                    disabled={isLoadingAdmissions || !customSearchAdmissionTerm.trim()}
+                                                                    className="h-7 px-2.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-all disabled:opacity-40 flex items-center gap-1"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-xs">search</span>
+                                                                    Buscar
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                                                        <span className="material-symbols-outlined text-xs text-emerald-600">check_circle</span>
+                                                        <span>Solo los registros marcados se actualizarán con el nuevo nombre.</span>
+                                                    </div>
+                                                </div>
                                             )}
 
                                             {/* Opcional: Correo del Estudiante (Solo Constancias) */}

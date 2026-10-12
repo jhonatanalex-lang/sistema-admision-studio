@@ -60,12 +60,12 @@ export const Attendance: React.FC<AttendanceProps> = ({ user, notify }) => {
     fetchAllUsers();
     fetchTodayRecords();
     const interval = setInterval(() => {
-        if (activeTab === 'kiosk' && !isManualModalOpen && !isReportModalOpen) {
+        if (activeTab === 'kiosk' && !isManualModalOpen && !isReportModalOpen && !recordToDelete && !isImportModalOpen) {
             inputRef.current?.focus();
         }
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeTab, isManualModalOpen, isReportModalOpen]);
+  }, [activeTab, isManualModalOpen, isReportModalOpen, recordToDelete, isImportModalOpen]);
 
   useEffect(() => {
     if (!selectedUserForReport?.id) return;
@@ -299,18 +299,23 @@ export const Attendance: React.FC<AttendanceProps> = ({ user, notify }) => {
   const confirmDeleteRecord = async () => {
     if (!recordToDelete) return;
     setIsDeleting(true);
+    const targetId = recordToDelete.id;
     try {
       const { error } = await supabase
         .from('asistencia')
         .delete()
-        .eq('id', recordToDelete.id);
+        .eq('id', targetId);
 
       if (error) throw error;
 
       notify('Marca de asistencia eliminada correctamente', 'success');
-      setHistoryRecords(prev => prev.filter(r => r.id !== recordToDelete.id));
-      setTodayRecords(prev => prev.filter(r => r.id !== recordToDelete.id));
+      setHistoryRecords(prev => prev.filter(r => r.id !== targetId));
+      setTodayRecords(prev => prev.filter(r => r.id !== targetId));
       setRecordToDelete(null);
+      await fetchTodayRecords();
+      if (activeTab === 'history') {
+        await fetchHistory();
+      }
     } catch (err: any) {
       console.error('Error al eliminar registro de asistencia:', err);
       notify(`Error al eliminar: ${err?.message || 'Error desconocido'}`, 'error');
@@ -732,8 +737,12 @@ export const Attendance: React.FC<AttendanceProps> = ({ user, notify }) => {
                                                 <p className={`text-[9px] font-black uppercase tracking-widest ${record.tipo === 'INGRESO' ? 'text-emerald-600' : 'text-amber-600'}`}>{record.tipo}</p>
                                             </div>
                                             <button 
-                                                onClick={() => setRecordToDelete(record)}
-                                                className="size-8 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100"
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setRecordToDelete(record);
+                                                }}
+                                                className="size-8 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 transition-all flex items-center justify-center opacity-80 sm:opacity-0 sm:group-hover:opacity-100"
                                                 title="Eliminar marca"
                                             >
                                                 <span className="material-symbols-outlined text-[18px]">delete</span>
@@ -859,8 +868,12 @@ export const Attendance: React.FC<AttendanceProps> = ({ user, notify }) => {
                                     </td>
                                     <td className="px-6 py-4 rounded-r-2xl border-y border-r border-slate-100 group-hover:border-slate-200 text-right">
                                         <button 
-                                            onClick={() => setRecordToDelete(record)}
-                                            className="size-8 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all flex items-center justify-center ml-auto"
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setRecordToDelete(record);
+                                            }}
+                                            className="size-8 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-all flex items-center justify-center ml-auto"
                                             title="Eliminar marca de asistencia"
                                         >
                                             <span className="material-symbols-outlined text-[18px]">delete</span>

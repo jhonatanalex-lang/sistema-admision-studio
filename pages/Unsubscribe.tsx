@@ -44,8 +44,36 @@ export const Unsubscribe: React.FC = () => {
 
   if (loading && status === 'idle') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <span className="material-symbols-outlined animate-spin text-slate-400 text-4xl">progress_activity</span>
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center p-4 select-none">
+        <div className="flex flex-col items-center animate-pulse">
+          <div className="w-20 h-20 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center p-3 shadow-2xl mb-4">
+            <img
+              src="/logo_admision.png"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.src.includes('googleusercontent')) {
+                  target.src = 'https://lh3.googleusercontent.com/d/1yN0_dziHYCbHPOnDb1Y7qYvHno-mUY7M';
+                }
+              }}
+              alt="Admisión UNSAAC"
+              className="w-full h-full object-contain filter drop-shadow-md"
+            />
+          </div>
+          <span className="text-[10px] font-medium tracking-[0.25em] text-slate-400 uppercase">
+            UNSAAC
+          </span>
+          <h1 className="text-sm font-semibold tracking-[0.14em] text-white uppercase mt-1">
+            Dirección de Admisión
+          </h1>
+          <div className="mt-6 flex flex-col items-center gap-2">
+            <div className="w-32 h-[2px] bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full w-1/3 bg-white/85 rounded-full animate-pulse" />
+            </div>
+            <p className="text-[11px] font-normal tracking-wide text-slate-400">
+              Gestionando suscripción...
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
