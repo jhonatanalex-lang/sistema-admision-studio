@@ -19,14 +19,11 @@ import {
 import { DriveConfigModal } from '../components/DriveConfigModal';
 
 export const DEFAULT_DESTINATIONS = [
-  'ABASTECIMIENTO',
-  'ARQUITECTURA',
   'ASESORIA JURIDICA',
   'BIBLIOTECA',
   'BIENESTAR',
   'CALIDAD',
   'CEPRU',
-  'CIENCIAS SOCIALES',
   'COMPUTO',
   'COOPERACION',
   'DIGA',
@@ -39,17 +36,15 @@ export const DEFAULT_DESTINATIONS = [
   'FACULTADES',
   'FORMULADORA',
   'GESTION ACADEMICA',
-  'IMAGEN INSTITUC',
+  'IMAGEN INSTITUCIONAL',
   'INFORMACION EXAMEN',
   'INSTITUTO DE IDIOMAS',
-  'INTERESADO',
   'LOGISTICA',
   'MANTENIMIENTO',
   'OBRAS',
   'OCI',
   'PATRIMONIO',
   'PLANIFICACION',
-  'POSTGRADO',
   'PRESUPUESTO',
   'PRONABEC',
   'RCU',
@@ -60,14 +55,9 @@ export const DEFAULT_DESTINATIONS = [
   'SEGURIDAD',
   'SINDUC',
   'SINTUC',
-  'SUBUNIDAD DE REMUNERACIONES',
-  'TECNOLOGIAS INFORMATICA',
   'TESORERIA',
-  'TRAMITE',
+  'TRAMITE DOCUMENTARIO',
   'TRANSPORTE',
-  'UNIDAD DE ABASTECIMIENTO',
-  'UNIDAD DE CENTRO DE CÓMPUTO',
-  'VICERRECTORADO ACADÉMICO',
   'VRAC',
   'VRIN',
   'OTROS'
@@ -201,17 +191,8 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
 
         setFiles(Array.from(groupedMap.values()));
         
-        const cleanDbDestinations = (data || [])
-          .map((item: any) => {
-            const raw = item.destination;
-            if (!raw) return null;
-            if (raw.startsWith('{') || raw.startsWith('[') || raw === '-') return null;
-            return raw.trim().toUpperCase();
-          })
-          .filter(Boolean) as string[];
-
-        const uniqueDestinations = Array.from(new Set([...DEFAULT_DESTINATIONS, ...cleanDbDestinations])).sort((a, b) => a.localeCompare(b));
-        setDestinationList(uniqueDestinations);
+        // Proteger el catálogo oficial de destinos para mantener una lista limpia sin absorber textos libres de la BD
+        setDestinationList(DEFAULT_DESTINATIONS);
       }
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
@@ -383,6 +364,7 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
       setSubject(''); 
       setDestination(''); 
       setIsCustomDestination(false);
+      setDestinationList(DEFAULT_DESTINATIONS);
       setStatus('Pendiente'); 
       setDriveUrl(''); 
       setSelectedFile(null);
@@ -399,8 +381,13 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
       setSubject(file.subject);
       const dest = file.destination === '-' ? '' : file.destination;
       setDestination(dest);
-      if (dest && !DEFAULT_DESTINATIONS.includes(dest) && !destinationList.includes(dest)) {
-          setIsCustomDestination(true);
+      if (dest && !DEFAULT_DESTINATIONS.includes(dest)) {
+          if (isAdmin) {
+              setIsCustomDestination(true);
+          } else {
+              setDestinationList(prev => prev.includes(dest) ? prev : [...prev, dest].sort((a,b) => a.localeCompare(b)));
+              setIsCustomDestination(false);
+          }
       } else {
           setIsCustomDestination(false);
       }
@@ -639,64 +626,85 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                       </div>
                       {!isCustomDestination ? (
                           <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-black text-slate-500 uppercase">Destino</span>
+                              <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-slate-500 uppercase">Oficina de Destino</span>
+                                  {isAdmin && (
+                                      <button
+                                          type="button"
+                                          onClick={() => {
+                                              setIsCustomDestination(true);
+                                              setDestination('');
+                                          }}
+                                          className="text-[10px] font-bold text-primary hover:underline flex items-center gap-0.5"
+                                          title="Solo administradores pueden agregar nuevas oficinas oficiales"
+                                      >
+                                          <span className="material-symbols-outlined text-[13px]">add_circle</span>
+                                          Nuevo Destino (Admin)
+                                      </button>
+                                  )}
+                              </div>
                               <select 
                                   value={destination} 
                                   onChange={e => {
                                       if (e.target.value === '__custom__') {
-                                          setIsCustomDestination(true);
-                                          setDestination('');
+                                          if (isAdmin) {
+                                              setIsCustomDestination(true);
+                                              setDestination('');
+                                          }
                                       } else {
                                           setDestination(e.target.value);
                                       }
                                   }} 
                                   className="h-11 sm:h-12 px-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-xs sm:text-sm font-bold uppercase focus:bg-white focus:border-primary outline-none transition-all"
                               >
-                                  <option value="">-- SELECCIONE DESTINO DE LA LISTA --</option>
+                                  <option value="">-- SELECCIONE DESTINO OFICIAL --</option>
                                   {destinationList.map(dest => (
                                       <option key={dest} value={dest}>{dest}</option>
                                   ))}
-                                  <option value="__custom__">➕ OTRO / ESCRIBIR NUEVO DESTINO...</option>
+                                  {isAdmin && (
+                                      <option value="__custom__">➕ OTRO / ESCRIBIR NUEVO DESTINO (SOLO ADMIN)...</option>
+                                  )}
                               </select>
+                              {!isAdmin && (
+                                  <p className="text-[10px] text-slate-400 font-medium">
+                                      Catálogo oficial protegido. Si la oficina requerida no figura en la lista, seleccione 'OTROS' y especifique en el asunto.
+                                  </p>
+                              )}
                           </div>
                       ) : (
-                          <div className="flex flex-col gap-1 animate-in fade-in">
-                              <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black text-primary uppercase flex items-center gap-1">
-                                      <span className="material-symbols-outlined text-[13px]">edit</span>
-                                      Escribir Nuevo Destino
-                                  </span>
-                                  <button
-                                      type="button"
-                                      onClick={() => {
-                                          setIsCustomDestination(false);
-                                          if (!destinationList.includes(destination)) {
-                                              setDestination('');
-                                          }
-                                      }}
-                                      className="text-[10px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 hover:underline"
-                                  >
-                                      <span className="material-symbols-outlined text-[13px]">list</span>
-                                      Elegir de la lista
-                                  </button>
+                          isAdmin && (
+                              <div className="flex flex-col gap-1 animate-in fade-in">
+                                  <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black text-primary uppercase flex items-center gap-1">
+                                          <span className="material-symbols-outlined text-[13px]">admin_panel_settings</span>
+                                          Registrar Nuevo Destino (Administrador)
+                                      </span>
+                                      <button
+                                          type="button"
+                                          onClick={() => {
+                                              setIsCustomDestination(false);
+                                              if (!destinationList.includes(destination)) {
+                                                  setDestination('');
+                                              }
+                                          }}
+                                          className="text-[10px] font-bold text-slate-500 hover:text-slate-800 flex items-center gap-1 hover:underline"
+                                      >
+                                          <span className="material-symbols-outlined text-[13px]">list</span>
+                                          Volver a la lista oficial
+                                      </button>
+                                  </div>
+                                  <div className="relative flex items-center">
+                                      <input 
+                                          type="text" 
+                                          value={destination} 
+                                          onChange={e => setDestination(e.target.value.toUpperCase())} 
+                                          className="w-full h-11 sm:h-12 px-3.5 sm:px-4 rounded-xl border-2 border-primary/40 bg-primary/5 text-xs sm:text-sm font-bold uppercase focus:bg-white focus:border-primary outline-none transition-all" 
+                                          placeholder="ESCRIBA EL NOMBRE OFICIAL DE LA NUEVA OFICINA..." 
+                                          autoFocus
+                                      />
+                                  </div>
                               </div>
-                              <div className="relative flex items-center">
-                                  <input 
-                                      type="text" 
-                                      list="destinos-datalist"
-                                      value={destination} 
-                                      onChange={e => setDestination(e.target.value.toUpperCase())} 
-                                      className="w-full h-11 sm:h-12 px-3.5 sm:px-4 rounded-xl border-2 border-primary/40 bg-primary/5 text-xs sm:text-sm font-bold uppercase focus:bg-white focus:border-primary outline-none transition-all" 
-                                      placeholder="Escriba el nombre del destino..." 
-                                      autoFocus
-                                  />
-                                  <datalist id="destinos-datalist">
-                                      {destinationList.map(d => (
-                                          <option key={d} value={d} />
-                                      ))}
-                                  </datalist>
-                              </div>
-                          </div>
+                          )
                       )}
                       <label className="flex flex-col gap-1">
                           <span className="text-[10px] font-black text-slate-500 uppercase">Asunto</span>
