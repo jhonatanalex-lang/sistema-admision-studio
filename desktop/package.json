@@ -1,7 +1,7 @@
 {
   "name": "sistema-admision-desktop",
-  "version": "1.0.31",
-  "description": "Sistema de Admision UNSAAC - Modulo de Charlas y Visitas de Colegios, Verificacion QR y Optimizacion",
+  "version": "1.0.32",
+  "description": "Sistema de Admision UNSAAC - Modulo de Control de Ingreso, Impresion Termica 80mm y Kiosko",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
