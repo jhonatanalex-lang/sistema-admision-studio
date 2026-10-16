@@ -589,3 +589,31 @@ export interface CharlaSolicitud {
     telefono?: string;
   };
 }
+
+export interface Simulacro {
+  id: string;
+  nombre: string;
+  fecha: string;
+  estado: 'Activo' | 'En Curso' | 'Finalizado';
+  created_at?: string;
+  total_postulantes?: number;
+  total_ingresados?: number;
+  sedes_stats?: Record<string, { total: number; ingresados: number }>;
+}
+
+export interface SimulacroPostulante {
+  id?: string;
+  simulacro_id: string;
+  dni: string;
+  nombres_apellidos: string;
+  apellidos?: string;
+  nombres?: string;
+  sede?: string;
+  aula?: string;
+  carpeta?: string;
+  carrera?: string;
+  grupo?: string;
+  ingreso_registrado: boolean;
+  hora_ingreso?: string | null;
+  created_at?: string;
+}

@@ -45,6 +45,7 @@ export const Settings: React.FC<{ user: User, notify?: (msg: string, type?: 'suc
     { id: 'view_resoluciones', label: 'Resoluciones' },
     { id: 'view_actas', label: 'Actas de Sesión' },
     { id: 'view_asistencia', label: 'Control de Asistencia' },
+    { id: 'view_control_ingreso', label: 'Control de Ingreso (Simulacro / Kiosko)' },
     { id: 'view_prestamos', label: 'Préstamo de Bienes' },
     { id: 'view_agenda', label: 'Agenda de Eventos' },
     { id: 'view_auditoria', label: 'Auditoría y Logs' },

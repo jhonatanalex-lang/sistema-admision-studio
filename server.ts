@@ -1019,6 +1019,300 @@ async function startServer() {
     }
   });
 
+  // --- CONTROL DE INGRESO DE POSTULANTES / SIMULACRO (KIOSKO & SCANNER) ---
+  app.get("/api/simulacros", async (req, res) => {
+    try {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data: simulacros, error } = await supabase
+        .from('simulacros')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Obtener conteos agrupados y desglose por sede para cada simulacro
+      const enriched = await Promise.all(
+        (simulacros || []).map(async (sim) => {
+          const { count: totalPostulantes } = await supabase
+            .from('simulacro_postulantes')
+            .select('*', { count: 'exact', head: true })
+            .eq('simulacro_id', sim.id);
+
+          const { count: totalIngresados } = await supabase
+            .from('simulacro_postulantes')
+            .select('*', { count: 'exact', head: true })
+            .eq('simulacro_id', sim.id)
+            .eq('ingreso_registrado', true);
+
+          // Obtener desglose por sede
+          const { data: sedeRows } = await supabase
+            .from('simulacro_postulantes')
+            .select('sede, ingreso_registrado')
+            .eq('simulacro_id', sim.id);
+
+          const sedesStats: Record<string, { total: number; ingresados: number }> = {};
+          (sedeRows || []).forEach(p => {
+            const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
+            if (!sedesStats[sName]) {
+              sedesStats[sName] = { total: 0, ingresados: 0 };
+            }
+            sedesStats[sName].total++;
+            if (p.ingreso_registrado) {
+              sedesStats[sName].ingresados++;
+            }
+          });
+
+          return {
+            ...sim,
+            total_postulantes: totalPostulantes || 0,
+            total_ingresados: totalIngresados || 0,
+            sedes_stats: sedesStats
+          };
+        })
+      );
+
+      res.json({ success: true, data: enriched });
+    } catch (err: any) {
+      const isMissingTable = err.code === 'PGRST205' || err.message?.includes('schema cache');
+      res.status(isMissingTable ? 404 : 500).json({ error: err.message, tableNotFound: isMissingTable });
+    }
+  });
+
+  app.post("/api/simulacros", async (req, res) => {
+    try {
+      const { nombre, fecha, estado } = req.body;
+      if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacros')
+        .insert([{ nombre, fecha: fecha || new Date().toISOString().split('T')[0], estado: estado || 'Activo' }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data: { ...data, total_postulantes: 0, total_ingresados: 0, sedes_stats: {} } });
+    } catch (err: any) {
+      const isMissingTable = err.code === 'PGRST205' || err.message?.includes('schema cache');
+      res.status(isMissingTable ? 404 : 500).json({ error: err.message, tableNotFound: isMissingTable });
+    }
+  });
+
+  app.patch("/api/simulacros/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacros')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/simulacros/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Eliminar postulantes y simulacro
+      await supabase.from('simulacro_postulantes').delete().eq('simulacro_id', id);
+      const { error } = await supabase.from('simulacros').delete().eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/simulacros/:id/postulantes", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacro_postulantes')
+        .select('*')
+        .eq('simulacro_id', id)
+        .order('dni', { ascending: true });
+
+      if (error) throw error;
+
+      // Normalizar nombres_apellidos para compatibilidad total
+      const normalized = (data || []).map((p: any) => ({
+        ...p,
+        nombres_apellidos: p.nombres_apellidos || [p.apellidos, p.nombres].filter(Boolean).join(' ') || 'SIN NOMBRE'
+      }));
+
+      res.json({ success: true, data: normalized });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/simulacros/:id/postulantes/bulk", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { postulantes } = req.body;
+      if (!Array.isArray(postulantes) || postulantes.length === 0) {
+        return res.status(400).json({ error: "Arreglo de postulantes requerido" });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Inserción en bloques de 500 registros para alta velocidad sin saturar conexión
+      const chunkSize = 500;
+      let insertedCount = 0;
+      for (let i = 0; i < postulantes.length; i += chunkSize) {
+        const chunk = postulantes.slice(i, i + chunkSize).map(p => {
+          const fullNombre = String(
+            p.nombres_apellidos || 
+            [p.apellidos, p.nombres].filter(Boolean).join(' ') || 
+            ''
+          ).trim().toUpperCase();
+
+          return {
+            simulacro_id: id,
+            dni: String(p.dni || '').trim(),
+            nombres_apellidos: fullNombre,
+            apellidos: fullNombre, // Compatibilidad si apellidos todavía tiene NOT NULL en BD
+            nombres: String(p.nombres || '').trim().toUpperCase(),
+            sede: String(p.sede || 'SEDE CENTRAL').trim().toUpperCase(),
+            aula: String(p.aula || '').trim().toUpperCase(),
+            carpeta: String(p.carpeta || '').trim().toUpperCase(),
+            carrera: String(p.carrera || '').trim().toUpperCase(),
+            grupo: String(p.grupo || 'ÚNICO').trim().toUpperCase(),
+            ingreso_registrado: Boolean(p.ingreso_registrado),
+            hora_ingreso: p.hora_ingreso || null
+          };
+        });
+
+        const { error } = await supabase
+          .from('simulacro_postulantes')
+          .upsert(chunk, { onConflict: 'simulacro_id,dni' });
+
+        if (error) {
+          // Si la columna nombres_apellidos aún no fue agregada en Supabase, reintentar sin ella
+          if (error.message?.includes('nombres_apellidos') || (error as any).code === 'PGRST204') {
+            const fallbackChunk = chunk.map(({ nombres_apellidos, ...rest }: any) => rest);
+            const { error: errFallback } = await supabase
+              .from('simulacro_postulantes')
+              .upsert(fallbackChunk, { onConflict: 'simulacro_id,dni' });
+            if (errFallback) throw errFallback;
+          } else {
+            throw error;
+          }
+        }
+        insertedCount += chunk.length;
+      }
+
+      res.json({ success: true, count: insertedCount });
+    } catch (err: any) {
+      console.error("Bulk upload postulantes error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/simulacros/:id/postulantes/:dni/ingreso", async (req, res) => {
+    try {
+      const { id, dni } = req.params;
+      const { hora_ingreso } = req.body;
+      const horaIngresoFinal = hora_ingreso || new Date().toISOString();
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacro_postulantes')
+        .update({ ingreso_registrado: true, hora_ingreso: horaIngresoFinal })
+        .eq('simulacro_id', id)
+        .eq('dni', dni)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/simulacros/:id/postulantes/sync-batch", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { entries } = req.body; // array of { dni, hora_ingreso }
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return res.json({ success: true, updated: 0 });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      let updatedCount = 0;
+      for (const item of entries) {
+        if (!item.dni) continue;
+        const { error } = await supabase
+          .from('simulacro_postulantes')
+          .update({
+            ingreso_registrado: true,
+            hora_ingreso: item.hora_ingreso || new Date().toISOString()
+          })
+          .eq('simulacro_id', id)
+          .eq('dni', item.dni);
+
+        if (!error) updatedCount++;
+      }
+
+      res.json({ success: true, updated: updatedCount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/simulacros/:id/postulantes", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { error } = await supabase
+        .from('simulacro_postulantes')
+        .delete()
+        .eq('simulacro_id', id);
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- VERIFICACIÓN OFICIAL DE CONSTANCIAS Y DOCUMENTOS ---
   app.post("/api/verificacion/emitir", async (req, res) => {
     try {

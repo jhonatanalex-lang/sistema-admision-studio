@@ -32,6 +32,7 @@ import Adjudication from './pages/Adjudication';
 import { VacancyEvolution } from './pages/VacancyEvolution';
 import { ExamBudget } from './pages/ExamBudget';
 import { IngresantesReport } from './pages/IngresantesReport';
+import { PostulantEntryControl } from './pages/PostulantEntryControl';
 import { Login } from './pages/Login';
 import { Unsubscribe } from './pages/Unsubscribe';
 import { PublicDocumentVerification } from './pages/PublicDocumentVerification';
@@ -265,6 +266,9 @@ function App() {
                 )}
                 {(user.role === 'Administrador' || (user.role === 'Operador' && user.permissions?.includes('view_asistencia'))) && (
                   <Route path="/attendance" element={<Attendance user={user} notify={addToast} />} />
+                )}
+                {(user.role === 'Administrador' || user.role === 'Director' || (user.role === 'Operador' && user.permissions?.includes('view_control_ingreso'))) && (
+                  <Route path="/entry-control" element={<PostulantEntryControl user={user} notify={addToast} />} />
                 )}
                 {(user.role === 'Administrador' || user.role === 'Director' || (user.role === 'Operador' && user.permissions?.includes('view_actas'))) && (
                   <Route path="/actas" element={<MeetingMinutes user={user} notify={addToast} />} />
