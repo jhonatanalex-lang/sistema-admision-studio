@@ -608,3 +608,41 @@ ipcMain.handle("users-update-password", async (event, { userId, password }) => {
   }
 });
 
+// Handler de Impresión Silenciosa Nativa de Tickets de 80mm
+ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
+  try {
+    const printWin = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+    return new Promise((resolve) => {
+      printWin.webContents.print(
+        {
+          silent: true,
+          printBackground: true,
+          margins: { marginType: "none" }
+        },
+        (success, failureReason) => {
+          printWin.close();
+          if (!success) {
+            console.error("[Electron Print] Falló la impresión silenciosa:", failureReason);
+            resolve({ success: false, error: failureReason });
+          } else {
+            console.log("[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa.");
+            resolve({ success: true });
+          }
+        }
+      );
+    });
+  } catch (err) {
+    console.error("[Electron Print] Error en print-ticket-80mm:", err);
+    return { success: false, error: err.message };
+  }
+});
+

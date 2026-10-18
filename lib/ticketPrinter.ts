@@ -16,17 +16,8 @@ export interface TicketPostulanteData {
   hora_ingreso?: string | null;
 }
 
-export const printTicket80mm = (postulante: TicketPostulanteData, simulacroNombre: string) => {
+export const printTicket80mm = async (postulante: TicketPostulanteData, simulacroNombre: string) => {
   try {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    document.body.appendChild(iframe);
-
     const horaActual = postulante.hora_ingreso 
       ? new Date(postulante.hora_ingreso).toLocaleTimeString('es-PE', { hour12: false })
       : new Date().toLocaleTimeString('es-PE', { hour12: false });
@@ -111,6 +102,30 @@ export const printTicket80mm = (postulante: TicketPostulanteData, simulacroNombr
         </body>
       </html>
     `;
+    // 1. PRIORIDAD: Si estamos en la App de Escritorio (Electron), imprimir 100% silencioso vía IPC nativo
+    if (typeof window !== 'undefined' && (window as any).electronAPI && typeof (window as any).electronAPI.printTicket80mm === 'function') {
+      try {
+        const res = await (window as any).electronAPI.printTicket80mm(content);
+        if (res && res.success) {
+          return;
+        }
+      } catch (ipcErr) {
+        console.warn('[TicketPrinter] Falló impresión nativa de Electron, usando fallback iframe:', ipcErr);
+      }
+    }
+
+    // 2. FALLBACK: Navegador Web (Chrome / Edge)
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '-9999px';
+    iframe.style.width = '350px';
+    iframe.style.height = '600px';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+
     iframe.contentWindow?.document.open();
     iframe.contentWindow?.document.write(content);
     iframe.contentWindow?.document.close();

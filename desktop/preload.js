@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateUser: (id, data) => ipcRenderer.invoke("users-update", { id, ...data }),
   deleteUser: (id) => ipcRenderer.invoke("users-delete", { id }),
   updateUserPassword: (userId, password) => ipcRenderer.invoke("users-update-password", { userId, password }),
+  printTicket80mm: (htmlContent) => ipcRenderer.invoke("print-ticket-80mm", htmlContent),
   
   onUpdateStatus: (callback) => {
     const subscription = (event, data) => callback(data);
