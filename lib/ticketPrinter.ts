@@ -112,15 +112,46 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
 </html>`;
 }
 
-export const printTicket80mm = async (postulante: TicketPostulanteData, simulacroNombre: string) => {
+export async function getAvailablePrinters(): Promise<Array<{ name: string; isDefault: boolean; displayName?: string }>> {
+  try {
+    const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
+    if (electronAPI?.getPrinters) {
+      return await electronAPI.getPrinters();
+    }
+  } catch (e) {
+    console.warn('No se pudieron obtener impresoras:', e);
+  }
+  return [];
+}
+
+export function getSavedPrinterName(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  return localStorage.getItem('kiosk_printer_name');
+}
+
+export function savePrinterName(printerName: string) {
+  if (typeof localStorage === 'undefined') return;
+  if (!printerName) {
+    localStorage.removeItem('kiosk_printer_name');
+  } else {
+    localStorage.setItem('kiosk_printer_name', printerName);
+  }
+}
+
+export const printTicket80mm = async (
+  postulante: TicketPostulanteData,
+  simulacroNombre: string,
+  printerName?: string
+) => {
   try {
     const htmlContent = generateTicketHtml(postulante, simulacroNombre);
+    const chosenPrinter = printerName || getSavedPrinterName() || undefined;
 
     // 1. VÍA ESCRITORIO (ELECTRON): Impresión 100% silenciosa por IPC
     const electronAPI = typeof window !== 'undefined' ? (window as any).electronAPI : undefined;
     if (electronAPI?.printTicket80mm) {
-      console.log('[Print] Enviando a impresora térmica mediante canal nativo de Electron...');
-      const result = await electronAPI.printTicket80mm(htmlContent);
+      console.log(`[Print] Enviando a ticketera térmica mediante canal Electron... ${chosenPrinter ? `(Impresora: ${chosenPrinter})` : '(Impresora predeterminada)'}`);
+      const result = await electronAPI.printTicket80mm({ htmlContent, printerName: chosenPrinter });
       if (result?.success) {
         return;
       }

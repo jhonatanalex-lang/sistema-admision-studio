@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { User, Simulacro, SimulacroPostulante } from '../types';
-import { printTicket80mm } from '../lib/ticketPrinter';
+import { printTicket80mm, getAvailablePrinters, getSavedPrinterName, savePrinterName } from '../lib/ticketPrinter';
 import { playSuccessSound, playErrorSound, playWarningSound } from '../lib/kioskAudio';
 
 interface PostulantEntryControlProps {
@@ -62,20 +62,93 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
   const [showSedesDrawer, setShowSedesDrawer] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
+  // --- CONFIGURACIÓN DE IMPRESORA TÉRMICA Y MODO KIOSKO ---
+  const [showPrinterModal, setShowPrinterModal] = useState(false);
+  const [availablePrinters, setAvailablePrinters] = useState<Array<{ name: string; isDefault: boolean; displayName?: string }>>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>(() => getSavedPrinterName() || '');
+  const [isTestingPrinter, setIsTestingPrinter] = useState(false);
+  const [isElectronEnv, setIsElectronEnv] = useState(false);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const focusIntervalRef = useRef<any>(null);
+
+  // Detección inicial de entorno e impresoras
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && Boolean((window as any).electronAPI);
+    setIsElectronEnv(isElectron);
+    if (isElectron) {
+      getAvailablePrinters().then(printers => {
+        setAvailablePrinters(printers);
+        const saved = getSavedPrinterName();
+        if (!saved && printers.length > 0) {
+          const thermal = printers.find(p => /pos|thermal|ticket|tp-?300|80mm/i.test(p.name));
+          const def = printers.find(p => p.isDefault);
+          const chosen = thermal?.name || def?.name || printers[0].name;
+          if (chosen) {
+            setSelectedPrinter(chosen);
+            savePrinterName(chosen);
+          }
+        }
+      });
+    }
+  }, []);
+
+  const handleSelectPrinter = (name: string) => {
+    setSelectedPrinter(name);
+    savePrinterName(name);
+    notify?.(`Impresora térmica asignada: ${name || 'Predeterminada de Windows'}`, 'success');
+  };
+
+  const handlePrintTestTicket = async () => {
+    setIsTestingPrinter(true);
+    try {
+      await printTicket80mm(
+        {
+          dni: '00000000',
+          nombres_apellidos: 'POSTULANTE DE PRUEBA 80MM',
+          sede: 'SEDE CENTRAL',
+          aula: 'AULA PILOTO 101',
+          carpeta: '01',
+          carrera: 'PRUEBA IMPRESIÓN TÉRMICA SILENCIOSA',
+          grupo: 'A',
+          hora_ingreso: new Date().toISOString()
+        },
+        activeSimulacro?.nombre || 'SIMULACRO TEST HARDWARE',
+        selectedPrinter || undefined
+      );
+      notify?.('Ticket de prueba enviado a la impresora.', 'info');
+    } catch (err: any) {
+      notify?.(`Error en ticket de prueba: ${err.message}`, 'error');
+    } finally {
+      setIsTestingPrinter(false);
+    }
+  };
+
+  const handleDownloadKioskBat = () => {
+    const batContent = `@echo off\r\ntitle Kiosko UNSAAC - Impresion Termica Silenciosa\r\necho =====================================================================\r\necho  DIRECCION DE ADMISION UNSAAC - CONTROL DE INGRESO (KIOSKO)\r\necho  Iniciando Google Chrome con bandera --kiosk-printing...\r\necho =====================================================================\r\necho.\r\necho Con este modo:\r\necho  1. Chrome envia los tickets directamente a la ticketera POS-D 80mm.\r\necho  2. NO se muestra ventana de vista previa ni confirmacion de impresion.\r\necho  3. Tiempo de impresion: ~0.2 segundos por postulante.\r\necho.\r\n\r\nset CHROME_PATH=""\r\nif exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (\r\n    set CHROME_PATH="%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"\r\n) else if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (\r\n    set CHROME_PATH="%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"\r\n) else if exist "%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe" (\r\n    set CHROME_PATH="%LocalAppData%\\Google\\Chrome\\Application\\chrome.exe"\r\n)\r\n\r\nif %CHROME_PATH%=="" (\r\n    start chrome --kiosk-printing "http://localhost:3000/#/entry-control"\r\n) else (\r\n    start "" %CHROME_PATH% --kiosk-printing "http://localhost:3000/#/entry-control"\r\n)\r\n`;
+    const blob = new Blob([batContent], { type: 'application/x-bat' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'iniciar_kiosko_web.bat';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    notify?.('Archivo iniciar_kiosko_web.bat generado y descargado.', 'success');
+  };
 
   const executeTicketPrint = useCallback((postulante: SimulacroPostulante) => {
     if (!activeSimulacro) return;
     setIsPrinting(true);
-    printTicket80mm(postulante, activeSimulacro.nombre)
+    printTicket80mm(postulante, activeSimulacro.nombre, selectedPrinter || undefined)
       .catch(err => {
         console.error('Error al imprimir ticket:', err);
       })
       .finally(() => {
         setTimeout(() => setIsPrinting(false), 1200);
       });
-  }, [activeSimulacro]);
+  }, [activeSimulacro, selectedPrinter]);
 
   // =========================================================================
   // CARGA INICIAL Y DATOS DE SIMULACROS
@@ -1128,6 +1201,19 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
               </button>
 
               <button
+                onClick={() => setShowPrinterModal(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                  selectedPrinter
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60'
+                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
+                }`}
+                title={`Impresora: ${selectedPrinter || 'Predeterminada de Windows'} - Clic para configurar`}
+              >
+                <span className="material-symbols-outlined text-[18px]">receipt_long</span>
+                <span className="hidden xl:inline max-w-[130px] truncate">{selectedPrinter || 'Ticketera'}</span>
+              </button>
+
+              <button
                 onClick={() => setIsManualInputOpen(true)}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all border border-slate-700"
                 title="Ingresar DNI manualmente con el teclado"
@@ -1500,6 +1586,15 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => setShowPrinterModal(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs uppercase tracking-wider transition-all border border-slate-300 shadow-sm active:scale-95"
+            title="Configurar impresora térmica 80mm (POS-D TP 300 PRO) y opciones de impresión silenciosa"
+          >
+            <span className="material-symbols-outlined text-[18px] text-emerald-600">print</span>
+            <span>Ticketera 80mm</span>
+          </button>
+
           <button
             onClick={() => {
               setSelectedSimulacroForCsv('');
@@ -2032,7 +2127,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                         </td>
                         <td className="p-3 text-right">
                           <button
-                            onClick={() => printTicket80mm(p, activeSimulacro.nombre)}
+                            onClick={() => executeTicketPrint(p)}
                             className="p-1.5 rounded-lg bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 transition-colors"
                             title="Imprimir ticket 80mm"
                           >
@@ -2044,6 +2139,210 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CONFIGURACIÓN DE IMPRESORA TÉRMICA 80MM Y LANZADOR KIOSKO SILENCIOSO */}
+      {/* ========================================================================= */}
+      {showPrinterModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full overflow-hidden animate-scale-up">
+            {/* Header */}
+            <div className="bg-slate-900 text-white p-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="size-11 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-2xl">print</span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black tracking-tight uppercase">
+                    Configuración de Ticketera 80mm
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium">
+                    POS-D TP 300 PRO • Impresión Silenciosa de Alta Velocidad (&lt; 0.2s)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPrinterModal(false)}
+                className="size-9 rounded-xl bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <span className="material-symbols-outlined text-xl">close</span>
+              </button>
+            </div>
+
+            {/* Contenido */}
+            <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+              {/* 1. Indicador de Entorno Activo */}
+              <div className="p-4 rounded-2xl border flex items-start gap-3 bg-slate-50 border-slate-200">
+                <span className="material-symbols-outlined text-2xl text-primary mt-0.5">
+                  {isElectronEnv ? 'desktop_windows' : 'language'}
+                </span>
+                <div className="flex-1 text-xs">
+                  <p className="font-bold text-slate-900 uppercase">
+                    Entorno detectado: {isElectronEnv ? 'App de Escritorio (Electron)' : 'Navegador Web (Google Chrome / Edge)'}
+                  </p>
+                  <p className="text-slate-600 mt-1 leading-relaxed">
+                    {isElectronEnv
+                      ? 'La app de escritorio gestiona la impresión en segundo plano vía USB con 1 segundo de margen de spooler para garantizar el vaciado de buffer.'
+                      : 'En entorno web, Chromium envía los tickets al driver de 80mm. Para suprimir la ventana previa de impresión usa el lanzador con --kiosk-printing.'}
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. Selección de Impresora en Escritorio */}
+              {isElectronEnv && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-emerald-600">settings</span>
+                      <span>Impresora Destino (Desktop)</span>
+                    </label>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {availablePrinters.length} impresoras detectadas
+                    </span>
+                  </div>
+
+                  {availablePrinters.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {availablePrinters.map(printer => {
+                        const isSelected = selectedPrinter === printer.name || (!selectedPrinter && printer.isDefault);
+                        const isPos = /pos|thermal|ticket|tp-?300|80mm/i.test(printer.name);
+
+                        return (
+                          <div
+                            key={printer.name}
+                            onClick={() => handleSelectPrinter(printer.name)}
+                            className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                              isSelected
+                                ? 'bg-emerald-50 border-emerald-500 shadow-sm'
+                                : 'bg-white border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className={`material-symbols-outlined text-xl ${isSelected ? 'text-emerald-600' : 'text-slate-400'}`}>
+                                {isSelected ? 'radio_button_checked' : 'radio_button_unchecked'}
+                              </span>
+                              <div>
+                                <p className={`text-xs font-black ${isSelected ? 'text-emerald-950' : 'text-slate-800'}`}>
+                                  {printer.name}
+                                </p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {printer.isDefault && (
+                                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded">
+                                      Predeterminada
+                                    </span>
+                                  )}
+                                  {isPos && (
+                                    <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded">
+                                      POS-D Térmica
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <span className="material-symbols-outlined text-emerald-600 text-lg">check_circle</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={selectedPrinter}
+                        onChange={e => handleSelectPrinter(e.target.value)}
+                        placeholder="Ej. POS-D TP 300 PRO (dejar vacío para predeterminada)"
+                        className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Botón de Ticket de Prueba */}
+              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-black uppercase text-emerald-950 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[18px] text-emerald-600">verified</span>
+                    <span>Test de Ticket Físico (80mm)</span>
+                  </h4>
+                  <p className="text-[11px] text-emerald-800 mt-0.5">
+                    Envía un ticket demo a la ticketera para validar guillotina, alineación y velocidad.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handlePrintTestTicket}
+                  disabled={isTestingPrinter}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {isTestingPrinter ? 'refresh' : 'print'}
+                  </span>
+                  <span>{isTestingPrinter ? 'Imprimiendo...' : 'Probar Impresora'}</span>
+                </button>
+              </div>
+
+              {/* 3. Lanzador Silencioso Web (--kiosk-printing) */}
+              <div className="space-y-3 pt-2 border-t border-slate-200">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase text-slate-700 tracking-wider flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-sky-600">rocket_launch</span>
+                    <span>Lanzador para Impresión Silenciosa en Web (Chrome)</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
+                    Sin Ventana Previa
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Si vas a operar en laptops desde el navegador <strong>Google Chrome</strong> en lugar de la app instalada, la bandera <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-800 font-mono text-[11px]">--kiosk-printing</code> desactiva la ventana emergente de Chrome y envía el ticket directo al hardware en <strong>0.2 segundos</strong>.
+                </p>
+
+                {/* Comando para copiar */}
+                <div className="bg-slate-900 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-white font-mono text-xs">
+                  <span className="text-emerald-400 truncate select-all">
+                    chrome.exe --kiosk-printing "http://localhost:3000/#/entry-control"
+                  </span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText('chrome.exe --kiosk-printing "http://localhost:3000/#/entry-control"');
+                      notify?.('Comando copiado al portapapeles.', 'success');
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1 shrink-0 text-[11px] font-sans font-bold"
+                    title="Copiar comando"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">content_copy</span>
+                    <span>Copiar</span>
+                  </button>
+                </div>
+
+                {/* Botón de descarga de archivo .bat */}
+                <button
+                  type="button"
+                  onClick={handleDownloadKioskBat}
+                  className="w-full py-3 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-98 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-lg">download</span>
+                  <span>Descargar Acceso Directo (iniciar_kiosko_web.bat)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-slate-50 p-4 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPrinterModal(false)}
+                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs uppercase tracking-wider transition-all"
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

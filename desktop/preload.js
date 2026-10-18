@@ -15,7 +15,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateUser: (id, data) => ipcRenderer.invoke("users-update", { id, ...data }),
   deleteUser: (id) => ipcRenderer.invoke("users-delete", { id }),
   updateUserPassword: (userId, password) => ipcRenderer.invoke("users-update-password", { userId, password }),
-  printTicket80mm: (htmlContent) => ipcRenderer.invoke("print-ticket-80mm", htmlContent),
   
   onUpdateStatus: (callback) => {
     const subscription = (event, data) => callback(data);
@@ -35,7 +34,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeListener("update-downloaded", subscription);
   },
 
-  // Impresión térmica 80mm silenciosa nativa
-  printTicket80mm: (htmlContent) => ipcRenderer.invoke("print-ticket-80mm", htmlContent),
+  // Impresión térmica 80mm silenciosa nativa (acepta htmlContent o { htmlContent, printerName })
+  printTicket80mm: (payload) => ipcRenderer.invoke("print-ticket-80mm", payload),
   getPrinters: () => ipcRenderer.invoke("get-printers")
 });

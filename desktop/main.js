@@ -621,9 +621,19 @@ ipcMain.handle("get-printers", async () => {
   }
 });
 
-ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
+ipcMain.handle("print-ticket-80mm", async (event, payload) => {
   return new Promise((resolve) => {
     try {
+      let htmlContent = "";
+      let printerName = undefined;
+
+      if (typeof payload === "string") {
+        htmlContent = payload;
+      } else if (payload && typeof payload === "object") {
+        htmlContent = payload.htmlContent || "";
+        printerName = payload.printerName || undefined;
+      }
+
       if (!htmlContent) {
         return resolve({ success: false, error: "Contenido HTML vacío" });
       }
@@ -642,18 +652,30 @@ ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
       printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
 
       printWindow.webContents.on("did-finish-load", () => {
-        // Imprimir silenciosamente a la impresora predeterminada (POS-D TP 300 PRO)
-        printWindow.webContents.print({
+        // Opciones de impresión térmica optimizadas para 80mm
+        const printOptions = {
           silent: true,
           printBackground: true,
           margins: { marginType: "none" }
-        }, (success, failureReason) => {
-          try {
-            printWindow.close();
-          } catch (e) {}
+        };
+
+        // Si se especificó una impresora térmica concreta, asignarla; de lo contrario usa la predeterminada del sistema
+        if (printerName) {
+          printOptions.deviceName = printerName;
+        }
+
+        printWindow.webContents.print(printOptions, (success, failureReason) => {
+          // Margen de seguridad de 1000ms antes de cerrar para asegurar que el buffer del spooler USB de Windows vacíe todo el ticket
+          setTimeout(() => {
+            try {
+              if (!printWindow.isDestroyed()) {
+                printWindow.close();
+              }
+            } catch (e) {}
+          }, 1000);
 
           if (success) {
-            console.log("[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa.");
+            console.log(`[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa${printerName ? ` en: ${printerName}` : ''}.`);
             resolve({ success: true });
           } else {
             console.error("[Electron Print] Error al imprimir ticket:", failureReason);
@@ -664,7 +686,9 @@ ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
 
       printWindow.webContents.on("did-fail-load", (e, code, desc) => {
         try {
-          printWindow.close();
+          if (!printWindow.isDestroyed()) {
+            printWindow.close();
+          }
         } catch (err) {}
         resolve({ success: false, error: `Error de carga: ${desc}` });
       });
