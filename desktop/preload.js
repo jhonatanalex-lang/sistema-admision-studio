@@ -33,5 +33,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const subscription = (event, info) => callback(info);
     ipcRenderer.on("update-downloaded", subscription);
     return () => ipcRenderer.removeListener("update-downloaded", subscription);
-  }
+  },
+
+  // Impresión térmica 80mm silenciosa nativa
+  printTicket80mm: (htmlContent) => ipcRenderer.invoke("print-ticket-80mm", htmlContent),
+  getPrinters: () => ipcRenderer.invoke("get-printers")
 });

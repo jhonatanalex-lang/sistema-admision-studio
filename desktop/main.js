@@ -608,41 +608,71 @@ ipcMain.handle("users-update-password", async (event, { userId, password }) => {
   }
 });
 
-// Handler de Impresión Silenciosa Nativa de Tickets de 80mm
-ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
+// --- IMPRESIÓN TÉRMICA NATIVA 80MM (SILENCIOSA EN SEGUNDO PLANO) ---
+ipcMain.handle("get-printers", async () => {
   try {
-    const printWin = new BrowserWindow({
-      show: false,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true
+    if (mainWindow && mainWindow.webContents) {
+      return await mainWindow.webContents.getPrintersAsync();
+    }
+    return [];
+  } catch (err) {
+    console.error("[Electron] Error al obtener impresoras:", err);
+    return [];
+  }
+});
+
+ipcMain.handle("print-ticket-80mm", async (event, htmlContent) => {
+  return new Promise((resolve) => {
+    try {
+      if (!htmlContent) {
+        return resolve({ success: false, error: "Contenido HTML vacío" });
       }
-    });
 
-    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+      // Crear ventana secundaria oculta dedicada a la impresión térmica de 80mm
+      const printWindow = new BrowserWindow({
+        show: false,
+        width: 350,
+        height: 600,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
 
-    return new Promise((resolve) => {
-      printWin.webContents.print(
-        {
+      printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+
+      printWindow.webContents.on("did-finish-load", () => {
+        // Imprimir silenciosamente a la impresora predeterminada (POS-D TP 300 PRO)
+        printWindow.webContents.print({
           silent: true,
           printBackground: true,
           margins: { marginType: "none" }
-        },
-        (success, failureReason) => {
-          printWin.close();
-          if (!success) {
-            console.error("[Electron Print] Falló la impresión silenciosa:", failureReason);
-            resolve({ success: false, error: failureReason });
-          } else {
+        }, (success, failureReason) => {
+          try {
+            printWindow.close();
+          } catch (e) {}
+
+          if (success) {
             console.log("[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa.");
             resolve({ success: true });
+          } else {
+            console.error("[Electron Print] Error al imprimir ticket:", failureReason);
+            resolve({ success: false, error: failureReason });
           }
-        }
-      );
-    });
-  } catch (err) {
-    console.error("[Electron Print] Error en print-ticket-80mm:", err);
-    return { success: false, error: err.message };
-  }
+        });
+      });
+
+      printWindow.webContents.on("did-fail-load", (e, code, desc) => {
+        try {
+          printWindow.close();
+        } catch (err) {}
+        resolve({ success: false, error: `Error de carga: ${desc}` });
+      });
+    } catch (err) {
+      console.error("[Electron Print] Excepción al lanzar impresión:", err);
+      resolve({ success: false, error: err.message });
+    }
+  });
 });
+
 

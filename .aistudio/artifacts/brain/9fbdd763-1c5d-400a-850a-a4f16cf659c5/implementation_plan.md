@@ -1,53 +1,51 @@
-# Plan de Implementación: Transición de Carga y Ensamblado de Silueta del Escudo UNSAAC
+# Plan de Implementación: Solución Integral de Impresión Térmica 80mm (Web y Escritorio Electron)
 
-## 1. Visión General
-Reemplazar los textos e íconos de carga genéricos por una experiencia visual institucional de primer nivel: una pantalla de carga y bienvenida (*Splash Screen*) que muestra el escudo de Admisión UNSAAC ensamblándose mediante el trazado progresivo de su silueta vectorial dorada, culminando en la revelación del escudo oficial con efectos de luz, tipografía *Cinzel* y una transición de salida fluida.
+## 1. Diagnóstico del Problema y Restricciones Técnicas
 
----
-
-## 2. Objetivos y Criterios del Usuario
-- **Efecto Visual:** Escudo ensamblándose con efecto de dibujo de silueta vectorial (*SVG stroke drawing*), halos de luz dorados/institucionales y revelado cromático del emblema de Admisión.
-- **Puntos de Activación:**
-  1. **Carga inicial nativa (`index.html`):** Inmediata desde el milisegundo 0 antes de que el bundle de JavaScript/React se descargue, evitando pantallas blancas o parpadeos.
-  2. **Verificación de sesión en React (`App.tsx`):** Sustituyendo el spinner simple de `isCheckingAuth` por el componente de transición interactivo.
-  3. **Reutilizable:** Componente desacoplado `SplashScreen.tsx` con soporte para desvanecimiento suave (*fade-out*) hacia la aplicación o pantalla de inicio de sesión.
+### ¿Por qué no imprime actualmente?
+1. **En Navegadores Web (Chrome / Edge):**
+   - El script actual crea un `<iframe>` con `width: 0; height: 0;`. Los motores Chromium modernos consideran los elementos de tamaño cero como *no renderizables* y descartan silenciosamente la llamada a `.print()`.
+   - Adicionalmente, los navegadores exigen que el documento dentro del iframe termine de parsear sus estilos antes de imprimir, y por defecto requieren interacción o el flag `--kiosk-printing` para no pausar en la ventana de previsualización.
+2. **En la Aplicación de Escritorio (Electron):**
+   - `desktop/main.js` y `desktop/preload.js` no tienen configurado ningún canal IPC para impresión térmica nativa. Al ejecutarse dentro de Electron, el `iframe.print()` queda atrapado en el sandbox del renderizador sin salida directa al hardware de Windows.
 
 ---
 
-## 3. Arquitectura Técnica
+## 2. Solución de Doble Vía (Híbrida Web + Desktop)
 
-### A. Preloader de Arranque en `index.html`
-- Insertar dentro de `<div id="root">` un contenedor estilizado con CSS embebido crítico y puro (cero dependencias externas).
-- Contendrá los trazados vectoriales (`<svg>`) del escudo institucional con animación de trazo continuo (`stroke-dasharray` y `stroke-dashoffset`), reflejando la heráldica y silueta del escudo de San Antonio Abad y Admisión.
-- Cuando React monta el componente raíz en `#root`, reemplaza suavemente el contenido del HTML nativo.
+### A. Para la Aplicación de Escritorio (Electron): Impresión 100% Silenciosa Directa
+- **En `desktop/main.js`:**
+  - Crear un manejador IPC `print-ticket-80mm` que utiliza una ventana secundaria oculta (`BrowserWindow` off-screen).
+  - Cargar el contenido HTML del ticket de 80mm e invocar `webContents.print({ silent: true, printBackground: true, margins: { marginType: 'none' } })`.
+  - Imprime directamente a la impresora térmica predeterminada de Windows (POS-D TP 300 PRO) en menos de 0.5 segundos **sin mostrar ninguna ventana ni confirmación**.
+- **En `desktop/preload.js`:**
+  - Exponer `window.electronAPI.printTicket80mm(htmlContent)` y `window.electronAPI.getPrinters()`.
 
-### B. Componente React `SplashScreen.tsx`
-- Componente de alta fidelidad con estados de ensamblado:
-  1. **Fase 1 (0ms - 1.2s):** Trazado y dibujo perimétrico de la silueta en líneas doradas luminosas.
-  2. **Fase 2 (1.2s - 2.0s):** Fusión y llenado del escudo oficial en alta resolución (`logo_admision.png` / emblema oficial) con halo radial y resplandor.
-  3. **Fase 3 (2.0s+):** Subtítulos institucionales animados (*"UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO"*, *"DIRECCIÓN DE ADMISIÓN"* y microbarra de sincronización).
-  4. **Fase de salida:** Desvanecimiento suave (*fade-out opacity 0 / scale 105%*) al completarse la autenticación.
-
-### C. Integración en `App.tsx`
-- Reemplazar el bloque condicional de carga:
-  ```tsx
-  if (isCheckingAuth) {
-    return <SplashScreen message="Verificando credenciales del sistema..." />;
-  }
-  ```
-- Permitir una experiencia visual sin saltos bruscos hacia el Dashboard o Login.
+### B. Para el Navegador Web (Google Chrome / Edge): Impresión Robusta y Modo Kiosk
+- **En `lib/ticketPrinter.ts`:**
+  - Detectar automáticamente si la aplicación corre en Electron (`window.electronAPI?.printTicket80mm`). Si es así, enviar el ticket por IPC silencioso.
+  - Si corre en la Web (Chrome/Edge):
+    - Configurar el iframe con dimensiones válidas en el árbol DOM (`width: 320px; height: 400px; position: fixed; top: -9999px; left: -9999px; opacity: 0; pointer-events: none;`) para que el motor Chromium jamás descarte la impresión.
+    - Utilizar eventos de ciclo de vida (`iframe.onload` + `requestAnimationFrame`) antes de disparar `contentWindow.print()`.
+  - Añadir soporte para el modo de acceso rápido Kiosko de Chrome/Edge (`--kiosk-printing`), el cual permite que en la web también imprima directo sin abrir la vista previa.
 
 ---
 
-## 4. Archivos a Modificar / Crear
-1. **`index.html`**: Estructura de preloader estático con animación CSS de dibujo vectorial directo.
-2. **`components/SplashScreen.tsx`** *(Nuevo)*: Componente React para la animación de ensamblado y transición.
-3. **`App.tsx`**: Integración del SplashScreen en la verificación de sesión.
-4. **`index.css`** o definiciones de animación en Tailwind: Reglas de animación clave (`@keyframes assembleShield`, `@keyframes strokeDraw`).
+## 3. Archivos a Modificar
+1. **`desktop/main.js`**: Implementar los manejadores IPC `print-ticket-80mm` y `get-printers` con impresión silenciosa en segundo plano.
+2. **`desktop/preload.js`**: Exponer las funciones de impresión a través del puente de contexto seguro (`contextBridge`).
+3. **`lib/ticketPrinter.ts`**:
+   - Agregar detección automática de entorno (Electron vs Web).
+   - Generar el HTML compatible e invocar IPC en escritorio o iframe visible fuera de pantalla en web.
+   - Mejorar compatibilidad de formato térmico 80mm con márgenes exactos.
+4. **`pages/PostulantEntryControl.tsx`**:
+   - Indicar visualmente en pantalla el estado de impresión (ej. *"🖨️ Imprimiendo ticket..."*) y garantizar que el botón manual "Reimprimir" funcione en ambas plataformas.
+5. **`desktop/package.json`**:
+   - Mantener la versión actualizada para el empaquetado de producción.
 
 ---
 
-## 5. Verificación y Pruebas
-1. Comprobación del ciclo de vida en recarga completa (Cold Start en el navegador).
-2. Verificación de compilación limpia con `compile_applet`.
-3. Verificación de fluidez a 60 fps y adaptación a modo móvil y escritorio.
+## 4. Verificación y Pruebas
+1. Prueba de compilación general (`compile_applet`) y verificación de tipos (`lint_applet`).
+2. Comprobación del disparo de impresión en entorno web sin errores de consola.
+3. Validación de las APIs nativas de Electron para asegurar compatibilidad con compilaciones de Windows.

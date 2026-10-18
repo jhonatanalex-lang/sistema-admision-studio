@@ -60,9 +60,22 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [kioskClock, setKioskClock] = useState(() => new Date().toLocaleTimeString('es-PE', { hour12: false }));
   const [showSedesDrawer, setShowSedesDrawer] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const focusIntervalRef = useRef<any>(null);
+
+  const executeTicketPrint = useCallback((postulante: SimulacroPostulante) => {
+    if (!activeSimulacro) return;
+    setIsPrinting(true);
+    printTicket80mm(postulante, activeSimulacro.nombre)
+      .catch(err => {
+        console.error('Error al imprimir ticket:', err);
+      })
+      .finally(() => {
+        setTimeout(() => setIsPrinting(false), 1200);
+      });
+  }, [activeSimulacro]);
 
   // =========================================================================
   // CARGA INICIAL Y DATOS DE SIMULACROS
@@ -963,7 +976,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
     setRecentScans(prev => [postulante, ...prev.filter(p => p.dni !== cleanDni)].slice(0, 8));
 
     if (autoPrintTicket) {
-      printTicket80mm(postulante, activeSimulacro.nombre);
+      executeTicketPrint(postulante);
     }
   };
 
@@ -1094,6 +1107,13 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
 
             {/* CONTROLES DE KIOSKO */}
             <div className="flex items-center gap-2">
+              {isPrinting && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black animate-pulse">
+                  <span className="material-symbols-outlined text-[16px] animate-spin">refresh</span>
+                  <span className="hidden sm:inline">Imprimiendo...</span>
+                </div>
+              )}
+
               <button
                 onClick={() => setAutoPrintTicket(!autoPrintTicket)}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
@@ -1276,7 +1296,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                     <p className="text-sm font-mono text-emerald-300 font-bold">{currentScan.timestamp}</p>
                   </div>
                   <button
-                    onClick={() => printTicket80mm(currentScan.postulante!, activeSimulacro.nombre)}
+                    onClick={() => executeTicketPrint(currentScan.postulante!)}
                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs transition-all shadow-md active:scale-95"
                   >
                     <span className="material-symbols-outlined text-[18px]">print</span>
@@ -1329,7 +1349,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
               </div>
 
               <button
-                onClick={() => printTicket80mm(currentScan.postulante!, activeSimulacro.nombre)}
+                onClick={() => executeTicketPrint(currentScan.postulante!)}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wide transition-all shadow-xl active:scale-95"
               >
                 <span className="material-symbols-outlined text-xl">print</span>
@@ -1391,7 +1411,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                     </p>
                   </div>
                   <button
-                    onClick={() => printTicket80mm(p, activeSimulacro.nombre)}
+                    onClick={() => executeTicketPrint(p)}
                     className="p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-emerald-400 transition-all"
                     title="Reimprimir ticket"
                   >
