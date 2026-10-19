@@ -68,6 +68,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
   const [selectedPrinter, setSelectedPrinter] = useState<string>(() => getSavedPrinterName() || '');
   const [isTestingPrinter, setIsTestingPrinter] = useState(false);
   const [isElectronEnv, setIsElectronEnv] = useState(false);
+  const [showTicketVisualPreview, setShowTicketVisualPreview] = useState(false);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const focusIntervalRef = useRef<any>(null);
@@ -2263,6 +2264,89 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                   )}
                 </div>
               )}
+
+              {/* Vista Previa del Diseño del Ticket (80mm) */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setShowTicketVisualPreview(!showTicketVisualPreview)}
+                  className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="size-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+                      <span className="material-symbols-outlined text-xl">receipt</span>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase text-slate-800">
+                        Diseño y Formato del Ticket 80mm
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        {showTicketVisualPreview ? 'Ocultar visualización en pantalla' : 'Ver maqueta visual exacta que se envía a la ticketera'}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="material-symbols-outlined text-slate-400">
+                    {showTicketVisualPreview ? 'expand_less' : 'expand_more'}
+                  </span>
+                </button>
+
+                {showTicketVisualPreview && (
+                  <div className="p-5 bg-slate-900 border-t border-slate-200 flex flex-col items-center">
+                    <p className="text-[10px] text-slate-400 font-mono mb-3 uppercase tracking-wider text-center">
+                      Vista a escala de impresión térmica (72mm imprimibles / rollo 80mm)
+                    </p>
+                    <div className="bg-white border-2 border-slate-400 shadow-2xl p-4 w-[280px] font-mono text-[11px] text-black leading-tight select-none">
+                      <div className="text-center font-black text-[12px] leading-tight">
+                        UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO
+                      </div>
+                      <div className="text-center text-[10px] text-slate-600 mt-1">
+                        DIRECCIÓN DE ADMISIÓN
+                      </div>
+                      <div className="border-t border-dashed border-black my-2" />
+                      <div className="text-center font-black uppercase text-[10px]">
+                        {activeSimulacro?.nombre || 'SIMULACRO GENERAL DE ADMISIÓN'}
+                      </div>
+                      <div className="border-t border-dashed border-black my-2" />
+                      <div className="flex justify-between text-[10px]">
+                        <span>FECHA: {new Date().toLocaleDateString('es-PE')}</span>
+                        <span>HORA: {new Date().toLocaleTimeString('es-PE', { hour12: false })}</span>
+                      </div>
+                      <div className="border-t border-dashed border-black my-2" />
+                      <div className="text-[10px] text-slate-600">POSTULANTE:</div>
+                      <div className="font-black text-[13px] leading-tight mt-0.5">
+                        QUISPE MAMANI, CARLOS DANIEL
+                      </div>
+                      <div className="mt-1">
+                        DNI: <span className="font-black text-[14px]">72849102</span>
+                      </div>
+                      <div className="border-t border-dashed border-black my-2" />
+                      <div className="border-2 border-black p-2 my-2 text-center bg-slate-50">
+                        <div className="text-[10px]">AULA DE EVALUACIÓN</div>
+                        <div className="text-[18px] font-black">AULA 204</div>
+                        <div className="text-[11px]">CARPETA Nº: <strong className="text-[14px]">18</strong></div>
+                      </div>
+                      <div className="flex justify-between my-1 text-[10px]">
+                        <span>SEDE:</span>
+                        <span className="font-bold">SEDE CENTRAL</span>
+                      </div>
+                      <div className="flex justify-between my-1 text-[10px]">
+                        <span>GRUPO:</span>
+                        <span className="font-bold">GRUPO A</span>
+                      </div>
+                      <div className="my-1 text-[10px]">
+                        <span>CARRERA:</span>
+                        <div className="font-bold">INGENIERÍA DE SISTEMAS</div>
+                      </div>
+                      <div className="border-t border-dashed border-black my-2" />
+                      <div className="text-center text-[9px] mt-1">
+                        [ ✔ ] INGRESO VERIFICADO
+                        <br />
+                        Conserve este ticket para su ubicación
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Botón de Ticket de Prueba */}
               <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">

@@ -652,36 +652,42 @@ ipcMain.handle("print-ticket-80mm", async (event, payload) => {
       printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
 
       printWindow.webContents.on("did-finish-load", () => {
-        // Opciones de impresión térmica optimizadas para 80mm
-        const printOptions = {
-          silent: true,
-          printBackground: true,
-          margins: { marginType: "none" }
-        };
+        // En Electron es fundamental esperar 400ms tras did-finish-load para que Chromium
+        // compute la maqueta, fuentes y dimensiones del DOM antes de enviar al spooler GDI de Windows (evita tickets en blanco)
+        setTimeout(() => {
+          if (printWindow.isDestroyed()) return;
 
-        // Si se especificó una impresora térmica concreta, asignarla; de lo contrario usa la predeterminada del sistema
-        if (printerName) {
-          printOptions.deviceName = printerName;
-        }
+          // Opciones de impresión térmica optimizadas para 80mm
+          const printOptions = {
+            silent: true,
+            printBackground: true,
+            margins: { marginType: "none" }
+          };
 
-        printWindow.webContents.print(printOptions, (success, failureReason) => {
-          // Margen de seguridad de 1000ms antes de cerrar para asegurar que el buffer del spooler USB de Windows vacíe todo el ticket
-          setTimeout(() => {
-            try {
-              if (!printWindow.isDestroyed()) {
-                printWindow.close();
-              }
-            } catch (e) {}
-          }, 1000);
-
-          if (success) {
-            console.log(`[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa${printerName ? ` en: ${printerName}` : ''}.`);
-            resolve({ success: true });
-          } else {
-            console.error("[Electron Print] Error al imprimir ticket:", failureReason);
-            resolve({ success: false, error: failureReason });
+          // Si se especificó una impresora térmica concreta, asignarla; de lo contrario usa la predeterminada del sistema
+          if (printerName) {
+            printOptions.deviceName = printerName;
           }
-        });
+
+          printWindow.webContents.print(printOptions, (success, failureReason) => {
+            // Margen de seguridad de 1200ms antes de cerrar para asegurar que el buffer del spooler USB de Windows vacíe todo el ticket
+            setTimeout(() => {
+              try {
+                if (!printWindow.isDestroyed()) {
+                  printWindow.close();
+                }
+              } catch (e) {}
+            }, 1200);
+
+            if (success) {
+              console.log(`[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa${printerName ? ` en: ${printerName}` : ''}.`);
+              resolve({ success: true });
+            } else {
+              console.error("[Electron Print] Error al imprimir ticket:", failureReason);
+              resolve({ success: false, error: failureReason });
+            }
+          });
+        }, 400);
       });
 
       printWindow.webContents.on("did-fail-load", (e, code, desc) => {

@@ -38,30 +38,55 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
     <title>Ticket Ingreso - ${postulante.dni}</title>
     <style>
       @page {
-        size: 80mm auto;
-        margin: 0;
+        size: auto;
+        margin: 0mm;
       }
       * {
         box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
       }
-      body {
-        font-family: 'Courier New', Courier, monospace;
+      html, body {
         width: 72mm;
+        max-width: 72mm;
         margin: 0 auto;
-        padding: 4mm 2mm;
-        color: #000;
-        background: #fff;
+        padding: 3mm 2mm 8mm 2mm;
+        color: #000000 !important;
+        background-color: #ffffff !important;
+        font-family: 'Courier New', Courier, monospace, 'Segoe UI', Arial, sans-serif;
         font-size: 12px;
-        font-weight: bold;
+        font-weight: 700;
         line-height: 1.25;
+        visibility: visible !important;
+        opacity: 1 !important;
+      }
+      @media print {
+        html, body {
+          width: 72mm !important;
+          max-width: 72mm !important;
+          margin: 0 auto !important;
+          padding: 2mm 1mm 6mm 1mm !important;
+          color: #000000 !important;
+          background: #ffffff !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          display: block !important;
+        }
+        * {
+          color: #000000 !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
       }
       .text-center { text-align: center; }
       .text-right { text-align: right; }
       .title { font-size: 13px; font-weight: 900; margin: 0; letter-spacing: -0.5px; }
-      .subtitle { font-size: 11px; margin: 2px 0; }
-      .divider { border-top: 1px dashed #000; margin: 6px 0; }
-      .row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11px; }
-      .big-box { border: 2px solid #000; padding: 6px; margin: 6px 0; text-align: center; }
+      .subtitle { font-size: 11px; margin: 2px 0; font-weight: 700; }
+      .divider { border-top: 1px dashed #000000; margin: 6px 0; }
+      .row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11px; font-weight: 700; }
+      .big-box { border: 2px solid #000000; padding: 6px; margin: 6px 0; text-align: center; }
       .big-text { font-size: 18px; font-weight: 900; }
     </style>
   </head>
@@ -161,13 +186,14 @@ export const printTicket80mm = async (
     // 2. VÍA WEB (CHROME / EDGE): Iframe visible para Chromium pero fuera del viewport
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
-    iframe.style.left = '-9999px';
-    iframe.style.top = '-9999px';
-    iframe.style.width = '350px';
-    iframe.style.height = '600px';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
     iframe.style.border = '0';
+    iframe.style.zIndex = '-9999';
+    iframe.style.visibility = 'visible'; // Mantiene visible para el motor de renderizado
+    iframe.style.opacity = '1';          // NUNCA usar opacity: 0 porque Chromium imprime en blanco
     iframe.setAttribute('title', 'ticket-print-frame');
     document.body.appendChild(iframe);
 
@@ -181,7 +207,7 @@ export const printTicket80mm = async (
     doc.write(htmlContent);
     doc.close();
 
-    // Esperar a que el layout y fuentes del iframe estén listos en el motor de renderizado
+    // Esperar 400ms para asegurar que el motor de renderizado y fuentes estén listos
     setTimeout(() => {
       try {
         iframe.contentWindow?.focus();
@@ -195,8 +221,8 @@ export const printTicket80mm = async (
         if (iframe.parentNode) {
           document.body.removeChild(iframe);
         }
-      }, 3000);
-    }, 150);
+      }, 4000);
+    }, 400);
   } catch (err) {
     console.error('Error general en printTicket80mm:', err);
   }
