@@ -38,7 +38,7 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
     <title>Ticket Ingreso - ${postulante.dni}</title>
     <style>
       @page {
-        size: auto;
+        size: 80mm 220mm;
         margin: 0mm;
       }
       * {
@@ -51,8 +51,8 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
       html, body {
         width: 72mm;
         max-width: 72mm;
-        margin: 0 auto;
-        padding: 3mm 2mm 8mm 2mm;
+        margin: 0;
+        padding: 2mm 2mm 8mm 2mm;
         color: #000000 !important;
         background-color: #ffffff !important;
         font-family: 'Courier New', Courier, monospace, 'Segoe UI', Arial, sans-serif;
@@ -66,7 +66,7 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
         html, body {
           width: 72mm !important;
           max-width: 72mm !important;
-          margin: 0 auto !important;
+          margin: 0 !important;
           padding: 2mm 1mm 6mm 1mm !important;
           color: #000000 !important;
           background: #ffffff !important;

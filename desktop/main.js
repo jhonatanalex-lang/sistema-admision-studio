@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { fork, execFile } = require("child_process");
 const { autoUpdater } = require("electron-updater");
 
@@ -622,84 +623,83 @@ ipcMain.handle("get-printers", async () => {
 });
 
 ipcMain.handle("print-ticket-80mm", async (event, payload) => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
+    let printWindow = null;
+    let tempPath = null;
     try {
       let htmlContent = "";
       let printerName = undefined;
-
       if (typeof payload === "string") {
         htmlContent = payload;
       } else if (payload && typeof payload === "object") {
         htmlContent = payload.htmlContent || "";
         printerName = payload.printerName || undefined;
       }
-
       if (!htmlContent) {
         return resolve({ success: false, error: "Contenido HTML vacío" });
       }
-
-      // Crear ventana secundaria oculta dedicada a la impresión térmica de 80mm
-      const printWindow = new BrowserWindow({
+      // Guardar en archivo temporal para que Chromium lo renderice con contexto local completo
+      tempPath = path.join(os.tmpdir(), `ticket_unsaac_${Date.now()}.html`);
+      fs.writeFileSync(tempPath, htmlContent, "utf8");
+      printWindow = new BrowserWindow({
         show: false,
-        width: 350,
-        height: 600,
+        width: 380,
+        height: 700,
         webPreferences: {
           nodeIntegration: false,
-          contextIsolation: true
+          contextIsolation: true,
+          backgroundThrottling: false // CRÍTICO: no suspender el renderizado en segundo plano
         }
       });
-
-      printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
-
-      printWindow.webContents.on("did-finish-load", () => {
-        // En Electron es fundamental esperar 400ms tras did-finish-load para que Chromium
-        // compute la maqueta, fuentes y dimensiones del DOM antes de enviar al spooler GDI de Windows (evita tickets en blanco)
-        setTimeout(() => {
-          if (printWindow.isDestroyed()) return;
-
-          // Opciones de impresión térmica optimizadas para 80mm
-          const printOptions = {
-            silent: true,
-            printBackground: true,
-            margins: { marginType: "none" }
-          };
-
-          // Si se especificó una impresora térmica concreta, asignarla; de lo contrario usa la predeterminada del sistema
-          if (printerName) {
-            printOptions.deviceName = printerName;
+      await printWindow.loadFile(tempPath);
+      // Esperar 400ms tras la carga para que las fuentes y estilos terminen de calcular el layout
+      setTimeout(() => {
+        if (!printWindow || printWindow.isDestroyed()) return;
+        const printOptions = {
+          silent: true,
+          printBackground: true,
+          color: false, // Monocromático térmico puro
+          margins: {
+            marginType: "custom",
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0
+          },
+          // 80mm de ancho y 220mm de largo en micrones (1mm = 1000 micrones)
+          pageSize: {
+            width: 80000,
+            height: 220000
           }
-
-          printWindow.webContents.print(printOptions, (success, failureReason) => {
-            // Margen de seguridad de 1200ms antes de cerrar para asegurar que el buffer del spooler USB de Windows vacíe todo el ticket
-            setTimeout(() => {
-              try {
-                if (!printWindow.isDestroyed()) {
-                  printWindow.close();
-                }
-              } catch (e) {}
-            }, 1200);
-
-            if (success) {
-              console.log(`[Electron Print] Ticket 80mm impreso exitosamente de forma silenciosa${printerName ? ` en: ${printerName}` : ''}.`);
-              resolve({ success: true });
-            } else {
-              console.error("[Electron Print] Error al imprimir ticket:", failureReason);
-              resolve({ success: false, error: failureReason });
-            }
-          });
-        }, 400);
-      });
-
-      printWindow.webContents.on("did-fail-load", (e, code, desc) => {
-        try {
-          if (!printWindow.isDestroyed()) {
-            printWindow.close();
+        };
+        if (printerName) {
+          printOptions.deviceName = printerName;
+        }
+        printWindow.webContents.print(printOptions, (success, failureReason) => {
+          setTimeout(() => {
+            try {
+              if (printWindow && !printWindow.isDestroyed()) {
+                printWindow.close();
+              }
+              if (tempPath && fs.existsSync(tempPath)) {
+                fs.unlinkSync(tempPath);
+              }
+            } catch (e) {}
+          }, 1200);
+          if (success) {
+            console.log(`[Electron Print] Ticket 80mm impreso exitosamente en: ${printerName || 'Predeterminada'}`);
+            resolve({ success: true });
+          } else {
+            console.error("[Electron Print] Error al imprimir ticket:", failureReason);
+            resolve({ success: false, error: failureReason });
           }
-        } catch (err) {}
-        resolve({ success: false, error: `Error de carga: ${desc}` });
-      });
+        });
+      }, 400);
     } catch (err) {
       console.error("[Electron Print] Excepción al lanzar impresión:", err);
+      if (tempPath && fs.existsSync(tempPath)) {
+        try { fs.unlinkSync(tempPath); } catch (e) {}
+      }
       resolve({ success: false, error: err.message });
     }
   });
