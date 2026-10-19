@@ -1596,24 +1596,28 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
             <span>Ticketera 80mm</span>
           </button>
 
-          <button
-            onClick={() => {
-              setSelectedSimulacroForCsv('');
-              setShowCsvModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95"
-          >
-            <span className="material-symbols-outlined text-[18px]">upload_file</span>
-            <span>Subir CSV de Postulantes</span>
-          </button>
+          {(user.role === 'Administrador' || user.role === 'Director') && (
+            <>
+              <button
+                onClick={() => {
+                  setSelectedSimulacroForCsv('');
+                  setShowCsvModal(true);
+                }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                <span>Subir CSV de Postulantes</span>
+              </button>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primary/90 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-primary/20 active:scale-95"
-          >
-            <span className="material-symbols-outlined text-[18px]">add</span>
-            <span>Nuevo Simulacro</span>
-          </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-primary hover:bg-primary/90 text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-primary/20 active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[18px]">add</span>
+                <span>Nuevo Simulacro</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1632,13 +1636,15 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
           <p className="text-sm text-slate-500 mb-6">
             Crea tu primer simulacro para habilitar la carga masiva del padrón de postulantes y lanzar el Modo Kiosko con lector de barras.
           </p>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-primary hover:bg-primary/90 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-primary/20"
-          >
-            <span className="material-symbols-outlined text-lg">add</span>
-            <span>Crear Primer Simulacro</span>
-          </button>
+          {(user.role === 'Administrador' || user.role === 'Director') && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-primary hover:bg-primary/90 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-primary/20"
+            >
+              <span className="material-symbols-outlined text-lg">add</span>
+              <span>Crear Primer Simulacro</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1655,27 +1661,43 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
               >
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <span
-                      onClick={() => handleToggleEstado(sim)}
-                      className={`text-[10px] font-black uppercase px-3 py-1 rounded-full cursor-pointer transition-all border ${
-                        sim.estado === 'Activo'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                          : sim.estado === 'En Curso'
-                          ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                          : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
-                      }`}
-                      title="Clic para alternar estado"
-                    >
-                      ● {sim.estado}
-                    </span>
+                    {user.role === 'Operador' ? (
+                      <span
+                        className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border select-none ${
+                          sim.estado === 'Activo'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : sim.estado === 'En Curso'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        ● {sim.estado}
+                      </span>
+                    ) : (
+                      <span
+                        onClick={() => handleToggleEstado(sim)}
+                        className={`text-[10px] font-black uppercase px-3 py-1 rounded-full cursor-pointer transition-all border ${
+                          sim.estado === 'Activo'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            : sim.estado === 'En Curso'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                        title="Clic para alternar estado"
+                      >
+                        ● {sim.estado}
+                      </span>
+                    )}
 
-                    <button
-                      onClick={() => handleDeleteSimulacro(sim)}
-                      className="text-slate-300 hover:text-rose-500 transition-colors p-1"
-                      title="Eliminar simulacro"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">delete</span>
-                    </button>
+                    {user.role !== 'Operador' && (
+                      <button
+                        onClick={() => handleDeleteSimulacro(sim)}
+                        className="text-slate-300 hover:text-rose-500 transition-colors p-1"
+                        title="Eliminar simulacro"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      </button>
+                    )}
                   </div>
 
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mb-1 group-hover:text-primary transition-colors">
@@ -1743,25 +1765,27 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                     <span>INICIAR MODO KIOSKO</span>
                   </button>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className={`grid gap-2 ${user.role === 'Operador' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     <button
                       onClick={() => handleOpenPadronModal(sim)}
-                      className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
+                      className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all w-full"
                     >
                       <span className="material-symbols-outlined text-[16px]">group</span>
                       <span>Ver Padrón</span>
                     </button>
 
-                    <button
-                      onClick={() => {
-                        setSelectedSimulacroForCsv(sim.id);
-                        setShowCsvModal(true);
-                      }}
-                      className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">upload</span>
-                      <span>Cargar CSV</span>
-                    </button>
+                    {user.role !== 'Operador' && (
+                      <button
+                        onClick={() => {
+                          setSelectedSimulacroForCsv(sim.id);
+                          setShowCsvModal(true);
+                        }}
+                        className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">upload</span>
+                        <span>Cargar CSV</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1982,13 +2006,15 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                   <span>Exportar CSV</span>
                 </button>
 
-                <button
-                  onClick={handleClearPadron}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold uppercase transition-all"
-                >
-                  <span className="material-symbols-outlined text-[16px]">delete_sweep</span>
-                  <span>Vaciar Padrón</span>
-                </button>
+                {user.role !== 'Operador' && (
+                  <button
+                    onClick={handleClearPadron}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold uppercase transition-all"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">delete_sweep</span>
+                    <span>Vaciar Padrón</span>
+                  </button>
+                )}
 
                 <button onClick={() => setShowPadronModal(false)} className="text-slate-400 hover:text-slate-700 p-1">
                   <span className="material-symbols-outlined">close</span>

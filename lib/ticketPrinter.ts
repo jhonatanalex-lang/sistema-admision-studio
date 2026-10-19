@@ -183,17 +183,17 @@ export const printTicket80mm = async (
       console.warn('[Print] Falló impresión nativa de Electron, recurriendo a modo web:', result?.error);
     }
 
-    // 2. VÍA WEB (CHROME / EDGE): Iframe visible para Chromium pero fuera del viewport
+    // 2. VÍA WEB (CHROME / EDGE): Iframe visible para Chromium con viewport real pero fuera de pantalla
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
+    iframe.style.left = '-9999px';
+    iframe.style.top = '-9999px';
+    iframe.style.width = '350px';
+    iframe.style.height = '600px';
     iframe.style.border = '0';
     iframe.style.zIndex = '-9999';
-    iframe.style.visibility = 'visible'; // Mantiene visible para el motor de renderizado
-    iframe.style.opacity = '1';          // NUNCA usar opacity: 0 porque Chromium imprime en blanco
+    iframe.style.visibility = 'visible';
+    iframe.style.opacity = '1';
     iframe.setAttribute('title', 'ticket-print-frame');
     document.body.appendChild(iframe);
 
