@@ -75,7 +75,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "yiroku20-lang",
+        "owner": "jhonatanalex-lang",
         "repo": "sistema-admision-web",
         "releaseType": "release"
       }
