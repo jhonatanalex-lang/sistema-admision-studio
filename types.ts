@@ -617,3 +617,50 @@ export interface SimulacroPostulante {
   hora_ingreso?: string | null;
   created_at?: string;
 }
+
+export interface SimulacroResultadoItem {
+  num?: number;
+  dni: string;
+  nombres: string;
+  sede: string; // Filial (Quillabamba, Abancay, Andahuaylas, etc.)
+  area: string; // Grupo / Área (A, B, C, D)
+  carrera: string; // Escuela Profesional
+  aula?: string;
+  carpeta?: string;
+  notaBase: number | 'NSP';
+  bono: number;
+  notaFinal: number | 'NSP';
+  isNsp: boolean;
+  observacion: string; // 'INGRESANTE' | '' | 'NSP'
+  vacanteAsignada?: boolean;
+}
+
+export interface SimulacroComisionMiembro {
+  nombre: string;
+  cargo: string;
+}
+
+export interface SimulacroCalificacionConfig {
+  simulacro_id: string;
+  proceso_nombre: string;
+  dependencia: string;
+  bono_general: number;
+  bono_areas: Record<string, number>;
+  tratar_cero_como_nsp: boolean;
+  comision: SimulacroComisionMiembro[];
+  fecha_calificacion: string;
+  vacantes_por_escuela?: Record<string, number>;
+  bono_umbral_activo?: boolean;
+  bono_umbral_corte?: number;
+  bono_umbral_puntos?: number;
+}
+
+export interface SimulacroCalificacionConsolidado {
+  id?: string;
+  simulacro_id: string;
+  archivo_nombre?: string;
+  configuracion: SimulacroCalificacionConfig;
+  resultados: SimulacroResultadoItem[];
+  created_at?: string;
+  updated_at?: string;
+}

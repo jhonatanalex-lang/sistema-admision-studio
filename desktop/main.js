@@ -221,6 +221,18 @@ app.on("window-all-closed", () => {
   }
 });
 
+app.on("before-quit", () => {
+  if (biometricProcess) {
+    try { biometricProcess.kill("SIGKILL"); } catch (e) {}
+    biometricProcess = null;
+  }
+  if (process.platform === "win32") {
+    try {
+      require("child_process").execSync("taskkill /F /IM BiometricBridge.exe /T 2>nul", { stdio: "ignore" });
+    } catch (e) {}
+  }
+});
+
 // 5. IPC Handlers
 ipcMain.handle("get-app-version", () => app.getVersion());
 
@@ -232,12 +244,56 @@ ipcMain.handle("download-update", () => {
   return autoUpdater.downloadUpdate().catch((err) => ({ error: err.message }));
 });
 
+// Función de Cierre Limpio y Actualización Inmediata sin Bloqueos de Procesos
+function cleanupAndInstall() {
+  console.log("[Updater] Preparando cierre limpio de procesos antes de instalar actualización...");
+  
+  if (biometricProcess) {
+    try {
+      biometricProcess.kill("SIGKILL");
+    } catch (e) {}
+    biometricProcess = null;
+  }
+  if (backendProcess) {
+    try {
+      backendProcess.kill("SIGKILL");
+    } catch (e) {}
+    backendProcess = null;
+  }
+
+  if (process.platform === "win32") {
+    try {
+      require("child_process").execSync("taskkill /F /IM BiometricBridge.exe /T 2>nul", { stdio: "ignore" });
+    } catch (e) {}
+  }
+
+  BrowserWindow.getAllWindows().forEach((win) => {
+    try {
+      win.removeAllListeners("close");
+      win.destroy();
+    } catch (e) {}
+  });
+
+  setImmediate(() => {
+    try {
+      autoUpdater.quitAndInstall(true, true);
+    } catch (err) {
+      console.error("[Updater] Error ejecutando quitAndInstall:", err);
+      app.exit(0);
+    }
+  });
+
+  setTimeout(() => {
+    app.exit(0);
+  }, 1500);
+}
+
 ipcMain.handle("quit-and-install", () => {
-  autoUpdater.quitAndInstall(false, true);
+  cleanupAndInstall();
 });
 
 ipcMain.handle("restart-app-for-update", () => {
-  autoUpdater.quitAndInstall(false, true);
+  cleanupAndInstall();
 });
 
 ipcMain.handle("restart-app", () => {

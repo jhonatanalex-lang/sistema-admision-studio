@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { User, Simulacro, SimulacroPostulante } from '../types';
 import { printTicket80mm, getAvailablePrinters, getSavedPrinterName, savePrinterName } from '../lib/ticketPrinter';
 import { playSuccessSound, playErrorSound, playWarningSound } from '../lib/kioskAudio';
+import { SimulacroCalificacionModal } from '../components/SimulacroCalificacionModal';
 
 interface PostulantEntryControlProps {
   user: User;
@@ -36,6 +37,14 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
   const [newSimulacroFecha, setNewSimulacroFecha] = useState(() => new Date().toISOString().split('T')[0]);
   const [showCsvModal, setShowCsvModal] = useState(false);
   const [selectedSimulacroForCsv, setSelectedSimulacroForCsv] = useState<string>('');
+  const [showCalificacionModal, setShowCalificacionModal] = useState(false);
+  const [selectedSimulacroForCalificacion, setSelectedSimulacroForCalificacion] = useState<Simulacro | null>(null);
+
+  const handleOpenCalificacionModal = (sim: Simulacro) => {
+    console.log('[Calificacion] Abriendo modal para simulacro:', sim.id, sim.nombre);
+    setSelectedSimulacroForCalificacion(sim);
+    setShowCalificacionModal(true);
+  };
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvPreview, setCsvPreview] = useState<any[]>([]);
   const [isUploadingCsv, setIsUploadingCsv] = useState(false);
@@ -1765,6 +1774,17 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                     <span>INICIAR MODO KIOSKO</span>
                   </button>
 
+                  {(user.role === 'Administrador' || user.role === 'Director') && (
+                    <button
+                      onClick={() => handleOpenCalificacionModal(sim)}
+                      className="w-full py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
+                      title="Calificación de exámenes, ajuste de puntos y reportes oficiales en PDF"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-amber-700">grade</span>
+                      <span>Calificación y Resultados</span>
+                    </button>
+                  )}
+
                   <div className={`grid gap-2 ${user.role === 'Operador' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     <button
                       onClick={() => handleOpenPadronModal(sim)}
@@ -2457,6 +2477,22 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
           </div>
         </div>
       )}
+    
+      {/* ========================================================================= */}
+      {/* MODAL: CALIFICACIÓN Y RESULTADOS DEL SIMULACRO */}
+      {/* ========================================================================= */}
+      {showCalificacionModal && selectedSimulacroForCalificacion && (
+        <SimulacroCalificacionModal
+          simulacro={selectedSimulacroForCalificacion}
+          isOpen={showCalificacionModal}
+          onClose={() => {
+            setShowCalificacionModal(false);
+            setSelectedSimulacroForCalificacion(null);
+          }}
+          notify={notify}
+        />
+      )}
+
     </div>
   );
 };
