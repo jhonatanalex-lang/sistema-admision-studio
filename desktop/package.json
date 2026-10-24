@@ -70,8 +70,7 @@
       "oneClick": true,
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
-      "runAfterFinish": true,
-      "killProcessFirst": true
+      "runAfterFinish": true
     },
     "publish": [
       {
