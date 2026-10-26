@@ -50,7 +50,7 @@ export async function getShieldLogoBase64(): Promise<string | null> {
         resolve(null);
       };
       fallbackImg.onerror = () => resolve(null);
-      fallbackImg.src = 'https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png';
+      fallbackImg.src = 'https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png';
     };
     img.src = '/escudo_unsaac_oficial.png';
   });

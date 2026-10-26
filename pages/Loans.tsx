@@ -1431,7 +1431,7 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
                     {/* Encabezado UNSAAC con Logos */}
                     <div className="flex items-center justify-between pb-4 border-b-2 border-double border-slate-300 mb-6 gap-4">
                       <img 
-                        src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
+                        src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
                         alt="Escudo UNSAAC" 
                         className="h-14 w-auto object-contain shrink-0"
                       />
@@ -1441,7 +1441,7 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
                         <h5 className="font-bold text-[8px] md:text-[9px] text-slate-500 mt-0.5">DIRECCIÓN DE ADMISIÓN</h5>
                       </div>
                       <img 
-                        src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo_admision_cuadrado.png" 
+                        src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo_admision_cuadrado.png" 
                         alt="Logo Admisión" 
                         className="h-14 w-auto object-contain shrink-0"
                       />
@@ -1601,7 +1601,7 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
               {/* Cabecera UNSAAC con Logos */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '2px double #000', paddingBottom: '12px', marginBottom: '25px' }}>
                 <img 
-                  src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
+                  src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
                   alt="Escudo UNSAAC" 
                   style={{ height: '60px', width: 'auto', objectFit: 'contain' }}
                 />
@@ -1611,7 +1611,7 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
                   <h4 style={{ fontSize: '9px', fontWeight: 'bold', margin: '2px 0 0', color: '#444', letterSpacing: '0.2px' }}>DIRECCIÓN DE ADMISIÓN</h4>
                 </div>
                 <img 
-                  src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo_admision_cuadrado.png" 
+                  src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo_admision_cuadrado.png" 
                   alt="Logo Admisión" 
                   style={{ height: '60px', width: 'auto', objectFit: 'contain' }}
                 />

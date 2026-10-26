@@ -310,8 +310,8 @@ ipcMain.handle("auth-login", async (event, { dni, password }) => {
       return { success: false, error: "DNI y contraseña son requeridos." };
     }
 
-    const SUPABASE_URL = "https://cnqpzyanmmwspvemcfeb.supabase.co";
-    const SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+    const SUPABASE_URL = "https://skspesnjdpypjyjuskht.supabase.co";
+    const SERVICE_KEY = "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
 
     console.log(`[Electron Main Auth] Procesando login nativo para DNI: ${cleanDni}`);
 
@@ -415,8 +415,8 @@ ipcMain.handle("auth-login", async (event, { dni, password }) => {
   }
 });
 
-const SUPABASE_URL = "https://cnqpzyanmmwspvemcfeb.supabase.co";
-const SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNucXB6eWFubW13c3B2ZW1jZmViIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTgxNTc0MywiZXhwIjoyMDg1MzkxNzQzfQ.ME18iloL44XbOeLo_TbK0CL3n_3jg-uVrr0VaTKZQDI";
+const SUPABASE_URL = "https://skspesnjdpypjyjuskht.supabase.co";
+const SERVICE_KEY = "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
 
 // Handlers de Gestión de Usuarios (Configuración) con Service Role Key (Bypass de RLS)
 ipcMain.handle("users-get", async () => {

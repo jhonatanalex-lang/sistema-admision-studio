@@ -93,7 +93,7 @@ export const PublicDocumentVerification: React.FC = () => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img
-              src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
+              src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
               alt="Escudo Oficial UNSAAC"
               className="h-12 sm:h-14 w-auto object-contain"
             />
@@ -112,7 +112,7 @@ export const PublicDocumentVerification: React.FC = () => {
 
           <div className="flex items-center gap-3">
             <img
-              src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png"
+              src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png"
               alt="Logo Dirección de Admisión"
               className="h-10 sm:h-12 w-auto object-contain"
             />
@@ -288,7 +288,7 @@ export const PublicDocumentVerification: React.FC = () => {
             <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <img
-                  src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
+                  src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
                   alt="Escudo Oficial UNSAAC"
                   className="h-10 sm:h-11 w-auto object-contain"
                 />
@@ -302,7 +302,7 @@ export const PublicDocumentVerification: React.FC = () => {
                 </div>
               </div>
               <img
-                src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png"
+                src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png"
                 alt="Logo Admisión UNSAAC"
                 className="h-8 sm:h-9 w-auto object-contain hidden sm:block"
               />

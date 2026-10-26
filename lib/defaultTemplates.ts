@@ -21,13 +21,13 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
     <!-- Encabezado Institucional -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7b1523; padding-bottom: 12px; margin-bottom: 25px;">
         <div style="display: flex; align-items: center; gap: 15px;">
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
             <div>
                 <h2 style="margin: 0; font-size: 15px; color: #7b1523; font-family: 'Times New Roman', serif; font-weight: bold; text-transform: uppercase;">UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO</h2>
                 <p style="margin: 2px 0 0 0; font-size: 12px; color: #444; font-weight: bold; letter-spacing: 1px;">DIRECCIÓN DE ADMISIÓN</p>
             </div>
         </div>
-        <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
+        <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
     </div>
 
     <!-- Título del Documento -->
@@ -143,12 +143,12 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
     <div style="flex: 1; padding: 30px 35px; position: relative; display: flex; flex-direction: column;">
         <!-- Marca de Agua -->
         <div id="watermark-container" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 0; opacity: 0.08;">
-             <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" style="width: 65%; height: auto; filter: grayscale(100%);" />
+             <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" style="width: 65%; height: auto; filter: grayscale(100%);" />
         </div>
 
         <!-- Encabezado con Logos Oficiales -->
         <div style="position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1.5px solid #e2e8f0;">
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 62px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 62px; width: auto; object-fit: contain;" />
             <div style="text-align: center; flex: 1; padding: 0 10px;">
                 <h2 style="font-family: 'Cinzel', serif; font-size: 19px; font-weight: 700; margin: 0; line-height: 1.15; color: #7b1523; letter-spacing: 0px; text-transform: uppercase;">
                     UNIVERSIDAD NACIONAL DE SAN ANTONIO<br>ABAD DEL CUSCO
@@ -158,7 +158,7 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
                     DIRECCIÓN DE ADMISIÓN
                 </h3>
             </div>
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 52px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 52px; width: auto; object-fit: contain;" />
         </div>
 
         <!-- Cuerpo -->
@@ -256,13 +256,13 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
     <!-- Encabezado Institucional -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7b1523; padding-bottom: 12px; margin-bottom: 25px;">
         <div style="display: flex; align-items: center; gap: 15px;">
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
             <div>
                 <h2 style="margin: 0; font-size: 15px; color: #7b1523; font-family: 'Times New Roman', serif; font-weight: bold; text-transform: uppercase;">UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO</h2>
                 <p style="margin: 2px 0 0 0; font-size: 12px; color: #444; font-weight: bold; letter-spacing: 1px;">DIRECCIÓN DE ADMISIÓN</p>
             </div>
         </div>
-        <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
+        <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
     </div>
 
     <!-- Título del Documento -->
@@ -358,13 +358,13 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
     <!-- Encabezado Institucional -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7b1523; padding-bottom: 12px; margin-bottom: 25px;">
         <div style="display: flex; align-items: center; gap: 15px;">
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
             <div>
                 <h2 style="margin: 0; font-size: 15px; color: #7b1523; font-family: 'Times New Roman', serif; font-weight: bold; text-transform: uppercase;">UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO</h2>
                 <p style="margin: 2px 0 0 0; font-size: 12px; color: #444; font-weight: bold; letter-spacing: 1px;">DIRECCIÓN DE ADMISIÓN</p>
             </div>
         </div>
-        <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
+        <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
     </div>
 
     <!-- Título del Documento -->
@@ -463,13 +463,13 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
     <!-- Encabezado Institucional -->
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #7b1523; padding-bottom: 12px; margin-bottom: 25px;">
         <div style="display: flex; align-items: center; gap: 15px;">
-            <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
+            <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="Escudo UNSAAC" style="height: 55px; width: auto; object-fit: contain;" />
             <div>
                 <h2 style="margin: 0; font-size: 15px; color: #7b1523; font-family: 'Times New Roman', serif; font-weight: bold; text-transform: uppercase;">UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO</h2>
                 <p style="margin: 2px 0 0 0; font-size: 12px; color: #444; font-weight: bold; letter-spacing: 1px;">DIRECCIÓN DE ADMISIÓN</p>
             </div>
         </div>
-        <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
+        <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%20color%20negro.png" alt="Logo Admisión" style="height: 48px; width: auto; object-fit: contain;" />
     </div>
 
     <!-- Título del Documento -->

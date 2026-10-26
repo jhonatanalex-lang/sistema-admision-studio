@@ -1877,7 +1877,7 @@ REGLAS DE REFINAMIENTO (OBLIGATORIAS):
       {/* Cabecera Profesional de Impresión y PDF con Logos Oficiales */}
       <div className={`${isExportingPdf ? 'flex' : 'hidden print:flex'} flex-row justify-between items-center border-b-2 border-slate-900 pb-4 mb-6 bg-white text-black`}>
         <img 
-          src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
+          src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
           alt="Escudo UNSAAC" 
           className="h-20 w-auto object-contain" 
           referrerPolicy="no-referrer" 
@@ -1900,7 +1900,7 @@ REGLAS DE REFINAMIENTO (OBLIGATORIAS):
           </p>
         </div>
         <img 
-          src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" 
+          src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" 
           alt="Oficina de Admisión Logo" 
           className="h-32 w-auto object-contain" 
           referrerPolicy="no-referrer" 
@@ -2790,7 +2790,7 @@ REGLAS DE REFINAMIENTO (OBLIGATORIAS):
                       <div className="flex items-center pb-4 border-b-2 border-slate-900 mb-6" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                         <div style={{ width: '80px', textAlign: 'left' }}>
                           <img 
-                            src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
+                            src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" 
                             alt="UNSAAC Escudo" 
                             className="h-16 w-auto object-contain" 
                             referrerPolicy="no-referrer" 
@@ -2802,7 +2802,7 @@ REGLAS DE REFINAMIENTO (OBLIGATORIAS):
                         </div>
                         <div style={{ width: '80px', textAlign: 'right' }}>
                           <img 
-                            src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" 
+                            src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" 
                             alt="Oficina de Admisión Logo" 
                             className="h-16 w-auto object-contain" 
                             referrerPolicy="no-referrer" 

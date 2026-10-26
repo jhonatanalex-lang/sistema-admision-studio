@@ -170,7 +170,7 @@ export const StaffConfirmation = () => {
       
       <div className="mx-auto w-full max-w-xl flex flex-col items-center">
           <div className="bg-white p-4 rounded-3xl shadow-xl inline-block mb-6 mt-4 sm:mt-0">
-              <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" alt="Logo de Admisión" className="h-20 object-contain" />
+              <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" alt="Logo de Admisión" className="h-20 object-contain" />
           </div>
           
           <div className="w-full bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 relative z-10 mb-8">

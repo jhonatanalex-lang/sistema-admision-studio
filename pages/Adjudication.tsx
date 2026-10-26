@@ -3741,7 +3741,7 @@ ALTER TABLE adjudicacion_ranking DISABLE ROW LEVEL SECURITY;
             {/* Subdued background watermark logo */}
             <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none z-0">
               <img
-                src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
+                src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
                 crossOrigin="anonymous"
                 alt="UNSAAC Watermark"
                 className="w-[500px] h-[500px] object-contain"
@@ -3752,7 +3752,7 @@ ALTER TABLE adjudicacion_ranking DISABLE ROW LEVEL SECURITY;
             <div className="relative z-10 flex flex-col shrink-0 gap-y-3">
               <div className="flex justify-between items-center px-4">
                 <img
-                  src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
+                  src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png"
                   crossOrigin="anonymous"
                   alt="UNSAAC Escudo"
                   style={{ height: "65px" }}
@@ -3767,7 +3767,7 @@ ALTER TABLE adjudicacion_ranking DISABLE ROW LEVEL SECURITY;
                   </p>
                 </div>
                 <img
-                  src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%202.png"
+                  src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%202.png"
                   crossOrigin="anonymous"
                   alt="Admisión"
                   style={{ height: "60px" }}

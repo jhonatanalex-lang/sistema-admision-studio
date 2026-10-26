@@ -47,7 +47,7 @@ export const handler = async (event: any) => {
 
     // Trigger redeploy to pick up the defined environment variables from Netlify API
     // Fetch the item name from inventory natively using fetch
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
     
     let nombreBien = 'Bien sin nombre';

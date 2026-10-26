@@ -62,7 +62,7 @@ const VacancyPreviewDocument: React.FC<VacancyPreviewDocumentProps> = ({
           {/* Vertical Header for PDF */}
           <div className="flex flex-col items-center justify-between border-r-2 pr-2 mr-1.5 w-[68px] shrink-0 pt-3 pb-3" style={{ borderColor: '#7b1523', backgroundColor: '#ffffff' }}>
             <div className="w-13 h-13 flex items-center justify-center shrink-0">
-              <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="UNSAAC" className="h-full object-contain" crossOrigin="anonymous" />
+              <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/escudo%20oficial-02%20(2).png" alt="UNSAAC" className="h-full object-contain" crossOrigin="anonymous" />
             </div>
             
             <div className="flex-1 flex flex-col items-center justify-center w-full relative overflow-visible min-h-[460px]">
@@ -74,7 +74,7 @@ const VacancyPreviewDocument: React.FC<VacancyPreviewDocumentProps> = ({
             </div>
 
             <div className="w-13 h-13 flex items-center justify-center shrink-0">
-              <img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" alt="Admisión" className="h-full object-contain" crossOrigin="anonymous" />
+              <img src="https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/logos/logo%20admision%201.png" alt="Admisión" className="h-full object-contain" crossOrigin="anonymous" />
             </div>
           </div>
 
