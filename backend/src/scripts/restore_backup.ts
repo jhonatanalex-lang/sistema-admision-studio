@@ -5,7 +5,7 @@ import path from "path";
 
 dotenv.config();
 
-const supabaseUrl = process.env.SUPABASE_URL || "https://cnqpzyanmmwspvemcfeb.supabase.co";
+const supabaseUrl = process.env.SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseKey) {
