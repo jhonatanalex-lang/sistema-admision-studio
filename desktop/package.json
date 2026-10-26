@@ -1,6 +1,6 @@
 {
   "name": "sistema-admision-desktop",
-  "version": "1.0.38",
+  "version": "1.0.39",
   "description": "Sistema de Admision UNSAAC - Modulo de Control de Ingreso, Impresion Termica Silenciosa 80mm y Kiosko",
   "main": "main.js",
   "type": "commonjs",
