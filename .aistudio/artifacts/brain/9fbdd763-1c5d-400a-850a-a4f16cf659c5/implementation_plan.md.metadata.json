@@ -1,0 +1,6 @@
+{
+  "summary": "Plan de implementación para habilitar la impresión térmica 80mm tanto en la aplicación de escritorio (Electron con impresión silenciosa nativa al 100%) como en el navegador web (Google Chrome / Edge sin bloqueos de iframe y con modo kiosk-printing).",
+  "updatedAt": "2026-10-17T01:02:46.353229141Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

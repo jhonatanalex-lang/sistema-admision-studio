@@ -1,0 +1,1506 @@
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import nodemailer from "nodemailer";
+import { createClient } from "@supabase/supabase-js";
+import cors from "cors";
+import { GoogleGenAI } from "@google/genai";
+import fs from "fs";
+import path from "path";
+import authRoutes from "./server/authRoutes";
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(cors());
+  // Increase limit for base64 PDF attachments
+  app.use(express.json({ limit: "50mb" }));
+
+  // --- AUTH ROUTES ---
+  app.use("/api/auth", authRoutes);
+
+  // --- LOCAL PROXY FOR FILES (DEV ONLY) ---
+  app.use("/api/files", async (req, res) => {
+    try {
+      const baseUrl = process.env.VITE_API_URL || "https://june-entertainment-thanks-include.trycloudflare.com";
+      const targetUrl = `${baseUrl}/api/files${req.url}`;
+      
+      const fetchReq = await import('node-fetch').then(m => m.default);
+      
+      const fetchHeaders: Record<string, string> = {};
+      for (const key in req.headers) {
+          if (req.headers[key] && key !== 'host') {
+              fetchHeaders[key] = req.headers[key] as string;
+          }
+      }
+      
+      const response = await fetchReq(targetUrl, {
+        method: req.method,
+        headers: fetchHeaders,
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : req.body
+      });
+
+      if (!response.ok) {
+        res.status(response.status).send(await response.text());
+        return;
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType) res.setHeader('Content-Type', contentType);
+      const contentDisposition = response.headers.get('content-disposition');
+      if (contentDisposition) res.setHeader('Content-Disposition', contentDisposition);
+
+      response.body.pipe(res);
+    } catch (error: any) {
+      console.error("Local proxy error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- GOOGLE DRIVE INTEGRATION & PROXY ROUTES ---
+  const driveConfigFile = path.resolve('data/drive_config.json');
+  const PERMANENT_DRIVE_CONFIG = {
+    folderUrl: "https://drive.google.com/drive/folders/1_90qY33PZYA0o2bIrmaQVs-KuMjY0CuF",
+    folderId: "1_90qY33PZYA0o2bIrmaQVs-KuMjY0CuF",
+    folderName: "Expedientes de Salida - Admisión UNSAAC",
+    webhookUrl: "https://script.google.com/macros/s/AKfycby2HWpuos2D4e-Vv3AkMJSbVA-6b-pHTWUSJL0IJRcEWUghjK2qlWb27jiYazQZl5RK/exec",
+    autoUploadEnabled: true
+  };
+
+  app.get("/api/drive-config", (req, res) => {
+    try {
+      if (fs.existsSync(driveConfigFile)) {
+        const content = fs.readFileSync(driveConfigFile, "utf-8");
+        const parsed = JSON.parse(content);
+        return res.json({
+          folderUrl: parsed.folderUrl || PERMANENT_DRIVE_CONFIG.folderUrl,
+          folderId: parsed.folderId || PERMANENT_DRIVE_CONFIG.folderId,
+          folderName: parsed.folderName || PERMANENT_DRIVE_CONFIG.folderName,
+          webhookUrl: parsed.webhookUrl || PERMANENT_DRIVE_CONFIG.webhookUrl,
+          autoUploadEnabled: parsed.autoUploadEnabled !== false
+        });
+      }
+      return res.json(PERMANENT_DRIVE_CONFIG);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/drive-config", (req, res) => {
+    try {
+      const config = {
+        ...PERMANENT_DRIVE_CONFIG,
+        ...req.body
+      };
+      const dir = path.dirname(driveConfigFile);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(driveConfigFile, JSON.stringify(config, null, 2), "utf-8");
+      res.json({ success: true, config });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/drive-upload", async (req, res) => {
+    try {
+      let { webhookUrl, folderId, fileName, fileBase64, mimeType } = req.body;
+
+      if ((!webhookUrl || !folderId) && fs.existsSync(driveConfigFile)) {
+        try {
+          const saved = JSON.parse(fs.readFileSync(driveConfigFile, "utf-8"));
+          if (!webhookUrl && saved.webhookUrl) webhookUrl = saved.webhookUrl;
+          if (!folderId && saved.folderId) folderId = saved.folderId;
+        } catch(e) {}
+      }
+
+      if (!webhookUrl) webhookUrl = PERMANENT_DRIVE_CONFIG.webhookUrl;
+      if (!folderId) folderId = PERMANENT_DRIVE_CONFIG.folderId;
+
+      const fetchReq = await import('node-fetch').then(m => m.default);
+      const payload = {
+        action: 'upload',
+        folderId: folderId || '',
+        fileName: fileName || `EXPEDIENTE_${Date.now()}.pdf`,
+        mimeType: mimeType || 'application/pdf',
+        fileBase64: fileBase64
+      };
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+      const upstream = await fetchReq(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        signal: controller.signal as any,
+        redirect: 'follow'
+      }).finally(() => clearTimeout(timeoutId));
+
+      if (!upstream.ok && upstream.status !== 302) {
+        return res.status(upstream.status).json({ success: false, error: `Apps Script respondió con error HTTP ${upstream.status}` });
+      }
+
+      const upstreamText = await upstream.text();
+      let data: any;
+      try {
+        data = JSON.parse(upstreamText);
+      } catch (jsonErr) {
+        return res.status(502).json({
+          success: false,
+          error: `Google Apps Script no devolvió JSON válido: ${upstreamText.slice(0, 160)}`
+        });
+      }
+
+      return res.json(data);
+    } catch (e: any) {
+      console.error("Error en proxy de subida a Google Drive:", e);
+      res.status(500).json({ success: false, error: e.name === 'AbortError' ? 'Tiempo de espera agotado al conectar con Google Drive (35s).' : e.message });
+    }
+  });
+
+  // --- GEMINI API ROUTE ---
+  app.post("/api/gemini", async (req, res) => {
+    try {
+      const { input, model, config } = req.body;
+      if (!input) return res.status(400).json({ error: "Input is required" });
+
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
+        return res.status(400).json({ error: "No se configuró la clave de API de Gemini (GEMINI_API_KEY)." });
+      }
+
+      const ai = new GoogleGenAI({ 
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      // Mapear de forma segura nombres de modelos experimentales o inexistentes en la API pública a uno válido y rápido
+      let selectedModel = model || 'gemini-2.5-flash';
+      if (
+        selectedModel.includes('3.5-flash') || 
+        selectedModel.includes('3.0-pro') || 
+        selectedModel.includes('3.0') || 
+        selectedModel.includes('3.5')
+      ) {
+        selectedModel = 'gemini-2.5-flash';
+      }
+
+      const requestOptions: any = {
+        model: selectedModel,
+        contents: input,
+      };
+      if (config) {
+        requestOptions.config = config;
+      }
+      const response = await ai.models.generateContent(requestOptions);
+
+      res.json({ text: response.text });
+    } catch (error: any) {
+      console.error("Gemini API Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 1. CRON JOB ENDPOINT (AUTOMATED REMINDERS) ---
+  const cronHandler = async (req: any, res: any) => {
+    try {
+      // Security Check (Verify that the cron job gave us the correct password)
+      const authHeader = req.headers.authorization || req.headers['autorización'] || req.headers['autorizacion'];
+      // Usamos una contraseña directa en el código para evitar tener que configurar una variable en Netlify
+      const cronSecret = process.env.CRON_SECRET || "UnsaacAdminCron2026_SuperSecreto!";
+      
+      const token = (typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/i, '').replace(/^Portador\s+/i, '') : '') || req.query.token || req.query.key;
+      
+      if (!token || token !== cronSecret) {
+        return res.status(401).json({ error: "No autorizado. Token de CRON inválido o no configurado." });
+      }
+
+      // Initialize Supabase fallback to real Service Role Key directly
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; // Defaulting to the project inferred from JWT
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      
+      if (!supabaseUrl || !supabaseKey) {
+        throw new Error("Credenciales de Supabase faltantes en el servidor.");
+      }
+
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // Fetch active/overdue loans that expire today or earlier
+      const { data: loans, error } = await supabase
+        .from('prestamos')
+        .select('*, inventario_bienes(nombre_bien)')
+        .in('estado_prestamo', ['Activo', 'Vencido'])
+        .lte('fecha_limite', todayStr)
+        .not('prestatario_correo', 'is', null)
+        .neq('prestatario_correo', '');
+
+      if (error) throw error;
+
+      if (!loans || loans.length === 0) {
+        return res.json({ message: "No hay préstamos pendientes por notificar hoy." });
+      }
+
+      // Prepare Nodemailer
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: process.env.GMAIL_USER || "admision@unsaac.edu.pe",
+          pass: process.env.GMAIL_APP_PASSWORD || "oaki mixo wlwa pecc",
+        },
+      });
+
+      let sentCount = 0;
+      
+      const groupedLoans = loans.reduce((acc: any, loan: any) => {
+        const key = loan.prestatario_correo;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(loan);
+        return acc;
+      }, {});
+
+      for (const [email, userLoans] of Object.entries(groupedLoans) as [string, any[]][]) {
+        const first = userLoans[0];
+        const bienesList = userLoans.map(i => `- ${i.inventario_bienes?.nombre_bien || 'Bien sin nombre'}`).join('\n');
+        
+        const rawDate = first.fecha_limite.includes('T') ? first.fecha_limite.split('T')[0] : first.fecha_limite;
+        const dLimite = new Date(rawDate + 'T12:00:00').toLocaleDateString();
+        
+        await transporter.sendMail({
+          from: `"Admisión UNSAAC" <${process.env.GMAIL_USER || "admision@unsaac.edu.pe"}>`,
+          to: email,
+          subject: 'URGENTE: Recordatorio Automático de Devolución - UNSAAC',
+          text: `Hola ${first.prestatario_nombre},\n\nTe escribimos de la Oficina de Admisión UNSAAC de manera automática para recordarte que la fecha límite para la devolución de los siguientes bienes fue/es el ${dLimite}.\n\nBienes pendientes:\n${bienesList}\n\nPor favor, acércate a la oficina con urgencia para regularizar la situación del equipo.\n\nSaludos cordiales,\nSistema Automático de Admisión UNSAAC`,
+        });
+        
+        sentCount++;
+      }
+
+      res.json({ success: true, emailsSent: sentCount });
+
+    } catch (error: any) {
+      console.error("Cron Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  app.get("/api/cron/send-reminders", cronHandler);
+  app.post("/api/cron/send-reminders", cronHandler);
+  app.get("/.netlify/functions/cron-reminders", cronHandler);
+  app.post("/.netlify/functions/cron-reminders", cronHandler);
+
+  // --- 2. REST API: GET PARTICIPANTES ---
+  app.get("/api/v1/participantes/:dni", async (req, res) => {
+    try {
+      const dniNumber = req.params.dni;
+      
+      // Simple Security layer using an API Key
+      // This forces other offices to use an API Key we give them.
+      const apiKey = req.headers['x-api-key'];
+      const validApiKey = process.env.PUBLIC_API_REST_KEY || "admision_unsaac_2026_read_key";
+      
+      if (!apiKey || apiKey !== validApiKey) {
+        return res.status(401).json({ error: "Acceso denegado. Se requiere un API KEY válido de la Oficina de Admisión UNSAAC." });
+      }
+
+      // Initialize Database Connection
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Search database for student
+      const { data, error } = await supabase
+        .from('participantes')
+        .select('CODPOSTULANTE, NOMBRE, CARRERA, MODALIDAD')
+        .eq('CODPOSTULANTE', dniNumber)
+        .order('ANIO', { ascending: false })
+        .order('SEMESTRE', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+
+      if (!data) {
+        return res.status(404).json({ success: false, message: "Participante no encontrado." });
+      }
+
+      // Return the JSON Payload
+      res.json({
+        success: true,
+        data: {
+          dni_codigo: data.CODPOSTULANTE,
+          nombres_completos: data.NOMBRE,
+          carrera: data.CARRERA,
+          modalidad: data.MODALIDAD,
+          fuente: "Sistema Central - Admisión UNSAAC"
+        }
+      });
+      
+    } catch (error: any) {
+      console.error("API Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Unsubscribe Endpoint ---
+  app.get("/api/unsubscribe", async (req, res) => {
+    try {
+      const { id } = req.query;
+      if (!id) {
+        return res.status(400).send("Falta el ID de prospecto.");
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { error } = await supabase
+        .from('prospectos_vocacionales')
+        .update({ suscrito: false })
+        .eq('id', id);
+
+      if (error) {
+        throw error;
+      }
+
+      res.send(`
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Suscripción Cancelada</title>
+            <style>
+              body { font-family: sans-serif; text-align: center; padding: 50px; background: #f8fafc; color: #334155; }
+              .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+              h1 { color: #dc2626; }
+              p { margin-bottom: 20px; line-height: 1.5; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Suscripción Cancelada</h1>
+              <p>Tu correo electrónico ha sido dado de baja exitosamente. Ya no recibirás más notificaciones automatizadas sobre nuestros exámenes de admisión.</p>
+              <p>Esperamos verte pronto en la UNSAAC.</p>
+            </div>
+          </body>
+        </html>
+      `);
+    } catch (error: any) {
+      console.error("Unsubscribe Error:", error);
+      res.status(500).send("Ocurrió un error al procesar tu solicitud.");
+    }
+  });
+
+  // --- Webhook for the Test App ---
+  app.post("/api/webhook/welcome-email", express.json({ limit: "5mb" }), async (req, res) => {
+    try {
+      // Support direct payloads and Supabase insert webhooks
+      const payload = req.body.record ? req.body.record : req.body;
+      const { id, correo, nombre, carrera_interes } = payload;
+
+      if (!correo || !nombre) {
+        return res.status(400).json({ error: "Nombre y correo son requeridos." });
+      }
+
+      const cancelUrl = id ? `${req.protocol}://${req.get('host')}/#/unsubscribe?id=${id}` : '#';
+      
+      const welcomeHtml = `
+        <div style="font-family: sans-serif; padding: 20px;">
+          <h2 style="color: #7b1523;">¡Bienvenido(a) a la plataforma de Atención y Orientación al Postulante UNSAAC!</h2>
+          <p>Hola <strong>${nombre}</strong>,</p>
+          <p>Gracias por realizar nuestro Test de Orientación Vocacional. Estamos muy felices de acompañarte en este paso tan importante que es decidir tu futuro profesional.</p>
+          ${carrera_interes 
+            ? `<p>Hemos notado tu interés en la carrera de <strong>${carrera_interes}</strong>. ¡Es una excelente elección!</p>` 
+            : '<p>Esperamos que el test te haya ayudado a descubrir la carrera ideal a tu perfil.</p>'}
+          <p>A partir de ahora, recibirás notificaciones y novedades sobre fechas de exámenes de admisión, ferias vocacionales y noticias importantes directamente en tu correo.</p>
+          <br/>
+          <p>Te invitamos a revisar los perfiles de todas nuestras escuelas profesionales en el siguiente enlace:</p>
+          <div style="margin: 20px 0;">
+            <a href="https://drive.google.com/file/d/1PjlN342ZH-b5p_c1-GB9VJUVUZf_w3LF/view?usp=sharing" target="_blank" style="background-color: #7b1523; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Ver Brochure de Carreras Profesionales</a>
+          </div>
+          <br/>
+          <p>Además, te recomendamos visitar nuestra <a href="https://admision.unsaac.edu.pe/" target="_blank" style="color: #7b1523; text-decoration: underline; font-weight: bold;">página web oficial</a> para conocer el temario, cuadro de vacantes, cronogramas de admisión, modalidades de ingreso y tutoriales para tu postulación.</p>
+          <br/>
+          <p>¡Mucho éxito en tu preparación!</p>
+          <p>Saludos cordiales,<br/><strong>Dirección de Admisión UNSAAC</strong></p>
+          
+          <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
+          <div style="text-align: center; font-size: 13px; color: #666;">
+            <p>Síguenos en nuestras redes sociales para estar al día:</p>
+            <div style="margin-top: 10px;">
+              <a href="https://www.facebook.com/p/Direcci%C3%B3n-de-Admisi%C3%B3n-Universidad-Nacional-de-San-Antonio-Abad-del-Cusco-61562739426524/?locale=es_LA" target="_blank" style="color: #1877F2; text-decoration: none; font-weight: bold; margin: 0 10px;">Facebook</a> |
+              <a href="http://www.youtube.com/@DireccionAdmisionUNSAAC" target="_blank" style="color: #FF0000; text-decoration: none; font-weight: bold; margin: 0 10px;">YouTube</a> |
+              <a href="https://www.tiktok.com/@unsaac.admision?is_from_webapp=1&sender_device=pc" target="_blank" style="color: #000000; text-decoration: none; font-weight: bold; margin: 0 10px;">TikTok</a>
+            </div>
+            <p style="margin-top: 20px; font-size: 10px; color: #999;">Este mensaje automático de bienvenida fue generado el ${new Date().toLocaleString('es-PE')}.</p>
+            ${id ? `<p style="margin-top: 5px; font-size: 11px; color: #999;">Si ya no deseas recibir este tipo de correos, puedes <a href="${cancelUrl}" target="_blank" style="color: #7b1523; text-decoration: underline;">darte de baja aquí</a>.</p>` : ''}
+          </div>
+        </div>
+      `;
+
+      const gmailUser = process.env.GMAIL_USER || "admision@unsaac.edu.pe";
+      const gmailPass = process.env.GMAIL_APP_PASSWORD || "oaki mixo wlwa pecc";
+
+      if (!gmailUser || !gmailPass) {
+        return res.status(500).json({ error: "Credenciales de correo no configuradas." });
+      }
+
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: gmailUser,
+          pass: gmailPass,
+        },
+      });
+
+      const mailOptions = {
+        from: `"Admisión UNSAAC" <${gmailUser}>`,
+        to: correo,
+        subject: `¡Bienvenido(a) a Atención y Orientación al Postulante UNSAAC, ${nombre}!`,
+        html: welcomeHtml,
+      };
+
+      await transporter.sendMail(mailOptions);
+      res.json({ success: true, message: "Correo de bienvenida enviado por Webhook" });
+    } catch (error: any) {
+      console.error("Webhook Email Error:", error);
+      if (error.response) {
+        console.error(error.response.body);
+      }
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Webhook for Loans (Prestamos) ---
+  const prestamosWebhookHandler = async (req: any, res: any) => {
+    try {
+      const payload = req.body;
+      if (!payload || !payload.type || !payload.record) {
+        return res.status(400).json({ error: "Payload no válido de Supabase." });
+      }
+
+      const { type, record, old_record } = payload;
+      
+      const prestatarioCorreo = record.prestatario_correo;
+      const prestatarioNombre = record.prestatario_nombre;
+      
+      if (!prestatarioCorreo) {
+        return res.status(200).json({ message: "No hay correo para notificar, omitiendo." });
+      }
+
+      const gmailUser = process.env.GMAIL_USER || "admision@unsaac.edu.pe";
+      const gmailPass = process.env.GMAIL_APP_PASSWORD || "oaki mixo wlwa pecc";
+
+      if (!gmailUser || !gmailPass) {
+        return res.status(500).json({ error: "Credenciales de correo no configuradas." });
+      }
+
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: gmailUser,
+          pass: gmailPass,
+        },
+      });
+
+      // Fetch the item name from inventory
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data: bienData, error } = await supabase
+        .from('inventario_bienes')
+        .select('nombre_bien, codigo_barras')
+        .eq('id', record.bien_id)
+        .single();
+        
+      if (error && error.code !== 'PGRST116') {
+         console.error("Error fetching inventario_bienes:", error);
+      }
+      
+      const nombreBien = bienData?.nombre_bien || 'Bien sin nombre';
+      const codigoBien = bienData?.codigo_barras || record.bien_id;
+
+      if (type === 'INSERT') {
+          // Newly created loan
+          const safeFechaLimite = record.fecha_limite ? new Date(record.fecha_limite).toLocaleDateString() : 'N/A';
+          
+          const subject = 'Confirmación de Préstamo de Bienes - UNSAAC';
+          const text = `Hola ${prestatarioNombre},\n\nTe escribimos de la Oficina de Admisión UNSAAC para confirmar el registro del préstamo del siguiente bien:\n\n- ${nombreBien} (Cod: ${codigoBien})\n\nTe comprometes a devolver este bien con fecha límite: ${safeFechaLimite}.\n\nSaludos cordiales,\nOficina de Admisión UNSAAC`;
+          
+          await transporter.sendMail({
+            from: `"Admisión UNSAAC" <${gmailUser}>`,
+            to: prestatarioCorreo,
+            subject,
+            text,
+          });
+          
+          return res.status(200).json({ success: true, message: "Correo de préstamo enviado exitosamente." });
+      } else if (type === 'UPDATE' && record.estado_prestamo === 'Devuelto' && old_record && old_record.estado_prestamo === 'Activo') {
+          // Loan marked as returned
+          const subject = 'Confirmación de Devolución de Bienes - UNSAAC';
+          const text = `Hola ${prestatarioNombre},\n\nTe escribimos de la Oficina de Admisión UNSAAC para agradecerte la devolución del siguiente bien:\n\n- ${nombreBien} (Cod: ${codigoBien})\n\nTu registro se encuentra ahora actualizado.\n\nSaludos cordiales,\nOficina de Admisión UNSAAC`;
+          
+          await transporter.sendMail({
+            from: `"Admisión UNSAAC" <${gmailUser}>`,
+            to: prestatarioCorreo,
+            subject,
+            text,
+          });
+          
+          return res.status(200).json({ success: true, message: "Correo de devolución enviado exitosamente." });
+      } else {
+          return res.status(200).json({ message: "No applicable event to process." });
+      }
+      
+    } catch (error: any) {
+      console.error("Webhook Prestamos Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  app.post("/api/webhooks/prestamos", express.json({ limit: "5mb" }), prestamosWebhookHandler);
+  app.post("/api/webhook/prestamos", express.json({ limit: "5mb" }), prestamosWebhookHandler);
+  app.post("/.netlify/functions/webhook-prestamos", express.json({ limit: "5mb" }), prestamosWebhookHandler);
+
+  // --- 3. REGULAR EMAIL ENDPOINT (MANUAL SEND) ---
+  // Support both local and Netlify function paths for transparency
+  const emailHandler = async (req: any, res: any) => {
+    try {
+      const { to, subject, text, html, attachmentBase64, filename } = req.body;
+
+      const gmailUser = process.env.GMAIL_USER || "admision@unsaac.edu.pe";
+      const gmailPass = process.env.GMAIL_APP_PASSWORD || "oaki mixo wlwa pecc";
+
+      if (!gmailUser || !gmailPass) {
+        return res.status(500).json({ 
+          error: "Credenciales de correo no configuradas en el servidor. Por favor configure GMAIL_USER y GMAIL_APP_PASSWORD." 
+        });
+      }
+
+      const transporter = nodemailer.createTransport({
+        service: "gmail",
+        auth: {
+          user: gmailUser,
+          pass: gmailPass,
+        },
+      });
+
+      const mailOptions: any = {
+        from: `"Admisión UNSAAC" <${gmailUser}>`,
+        to,
+        subject,
+        text,
+        html,
+      };
+
+      if (req.body.attachments && Array.isArray(req.body.attachments)) {
+        mailOptions.attachments = req.body.attachments.map((att: any) => ({
+            filename: att.filename,
+            content: att.content.includes("base64,") ? att.content.split("base64,")[1] : att.content,
+            encoding: "base64",
+        }));
+      } else if (attachmentBase64) {
+        mailOptions.attachments = [
+          {
+            filename: filename || "documento.pdf",
+            content: attachmentBase64.includes("base64,") ? attachmentBase64.split("base64,")[1] : attachmentBase64,
+            encoding: "base64",
+          },
+        ];
+      }
+
+      await transporter.sendMail(mailOptions);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error sending email:", error);
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  app.post("/api/send-email", emailHandler);
+  app.post("/.netlify/functions/send-email", emailHandler);
+
+  // --- 4. SECURE USER CREATION ENDPOINT ---
+  app.post("/api/create-user", async (req, res) => {
+    try {
+      const { dni, password, name, role, permissions } = req.body;
+      if (!dni || !password || !name || !role) {
+        return res.status(400).json({ error: "Faltan datos obligatorios." });
+      }
+
+      // We should ideally verify the requester is an admin, but for this internal preview app we'll handle the creation.
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // 1. Check if user already exists in public DB
+      const cleanDni = String(dni).trim();
+      const { data: existingUser } = await supabase.from('usuarios').select('dni, name').eq('dni', cleanDni).maybeSingle();
+      if (existingUser) {
+          return res.status(400).json({ error: `El usuario con DNI ${cleanDni} ya existe (${existingUser.name}).` });
+      }
+
+      const email = `${cleanDni}@admin.unsaac.pe`;
+
+      // 2. Create user in Supabase Auth using Admin API (or link existing)
+      let userId: string | null = null;
+      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+          email: email,
+          password: password,
+          email_confirm: true,
+      });
+
+      if (authError) {
+          if (authError.message.includes("already been registered") || authError.message.includes("already exists")) {
+              const { data: listData } = await supabase.auth.admin.listUsers();
+              const found = listData?.users?.find((u: any) => u.email?.toLowerCase() === email.toLowerCase());
+              if (found) {
+                  userId = found.id;
+                  await supabase.auth.admin.updateUserById(userId, { password: password });
+              } else {
+                  return res.status(400).json({ error: "Error en Auth: " + authError.message });
+              }
+          } else {
+              return res.status(400).json({ error: "Error en Auth: " + authError.message });
+          }
+      } else {
+          userId = authUser.user.id;
+      }
+
+      // 3. Insert into public.usuarios with verified auth.users id
+      const { error: dbError } = await supabase.from('usuarios').insert([{
+          id: userId,
+          dni: cleanDni,
+          password: password,
+          name: String(name).trim(),
+          role: role,
+          permissions: role === 'Operador' ? (permissions || null) : null
+      }]);
+
+      if (dbError) {
+          return res.status(400).json({ error: "Error al guardar perfil: " + dbError.message });
+      }
+
+      res.status(200).json({ success: true, message: "Usuario creado exitosamente.", userId });
+
+    } catch (error: any) {
+      console.error("Create User Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 5. SECURE USER PASSWORD UPDATE ENDPOINT ---
+  app.post("/api/update-user-password", async (req, res) => {
+    try {
+      const { user_id, password } = req.body;
+      if (!user_id || !password) {
+        return res.status(400).json({ error: "Faltan datos obligatorios." });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // 1. Update in auth system
+      const { error: authError } = await supabase.auth.admin.updateUserById(user_id, {
+          password: password
+      });
+
+      if (authError) {
+          return res.status(400).json({ error: "Error al actualizar credenciales: " + authError.message });
+      }
+
+      // 2. Update plainly in public DB (for reference in this specific app logic)
+      const { error: dbError } = await supabase.from('usuarios').update({ password: password }).eq('id', user_id);
+
+      if (dbError) {
+          return res.status(400).json({ error: "Error al actualizar perfil: " + dbError.message });
+      }
+
+      res.status(200).json({ success: true, message: "Contraseña actualizada exitosamente." });
+      
+    } catch (error: any) {
+      console.error("Update Password Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 5b. GET USERS ENDPOINT ---
+  app.get("/api/users", async (req, res) => {
+    try {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('usuarios')
+        .select('id, dni, name, role, permissions, created_at, password')
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      res.json(data || []);
+    } catch (error: any) {
+      console.error("Fetch Users Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 5c. UPDATE USER PROFILE ENDPOINT ---
+  app.post("/api/update-user", async (req, res) => {
+    try {
+      const { id, dni, name, role, permissions } = req.body;
+      if (!id || !dni || !name || !role) {
+        return res.status(400).json({ error: "Faltan datos obligatorios." });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { error: dbError } = await supabase
+        .from('usuarios')
+        .update({
+          dni: String(dni).trim(),
+          name: String(name).trim(),
+          role: role,
+          permissions: role === 'Operador' ? permissions : null
+        })
+        .eq('id', id);
+
+      if (dbError) {
+        return res.status(400).json({ error: "Error al actualizar usuario: " + dbError.message });
+      }
+
+      res.status(200).json({ success: true, message: "Usuario actualizado exitosamente." });
+    } catch (error: any) {
+      console.error("Update User Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 5d. DELETE USER ENDPOINT ---
+  app.post("/api/delete-user", async (req, res) => {
+    try {
+      const { id } = req.body;
+      if (!id) {
+        return res.status(400).json({ error: "ID de usuario requerido." });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // 1. Delete from public.usuarios
+      const { error: dbError } = await supabase.from('usuarios').delete().eq('id', id);
+      if (dbError) {
+        return res.status(400).json({ error: "Error al eliminar usuario: " + dbError.message });
+      }
+
+      // 2. Try delete from auth.users
+      try {
+        await supabase.auth.admin.deleteUser(id);
+      } catch (authErr) {
+        console.warn("Auth user deletion warning:", authErr);
+      }
+
+      res.status(200).json({ success: true, message: "Usuario eliminado exitosamente." });
+    } catch (error: any) {
+      console.error("Delete User Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 6. PRE-REVISION ENDPOINTS (Bypass RLS) ---
+  app.post("/api/save-pre-revision", express.json({ limit: "50mb" }), async (req, res) => {
+    try {
+      const { modalidad_id, csv_data } = req.body;
+      if (!modalidad_id) return res.status(400).json({ error: "modalidad_id is required" });
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      await supabase.from('pre_revision_archivos').delete().eq('modalidad_id', modalidad_id);
+      const { error } = await supabase.from('pre_revision_archivos').insert({
+        modalidad_id,
+        csv_data
+      });
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Save Pre-Revision Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/get-pre-revision/:modId", async (req, res) => {
+    try {
+      const modId = req.params.modId;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('pre_revision_archivos')
+        .select('*')
+        .eq('modalidad_id', modId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (data && data.csv_data && typeof data.csv_data === 'string') {
+        try {
+          data.csv_data = JSON.parse(data.csv_data);
+        } catch (e) {
+          console.error("Error parsing csv_data string to JSON in server:", e);
+        }
+      }
+
+      res.json({ success: true, data });
+    } catch (error: any) {
+      console.error("Get Pre-Revision Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/get-pre-revisions-status", async (req, res) => {
+    try {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('pre_revision_archivos')
+        .select('modalidad_id');
+
+      if (error) throw error;
+      const ids = (data || []).map(item => item.modalidad_id);
+      res.json({ success: true, savedModalidadIds: ids });
+    } catch (error: any) {
+      console.error("Get Pre-Revisions Status Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- 7. Sincronización de puestos correlativos en participantes ---
+  app.post("/api/sync-participantes-omerito", async (req, res) => {
+    try {
+      const { updates } = req.body;
+      if (!updates || !Array.isArray(updates)) {
+        return res.status(400).json({ error: "Falta la lista de actualizaciones ('updates')." });
+      }
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      let successCount = 0;
+      for (const item of updates) {
+        const { dni, omerito, codigo_carrera, semestre } = item;
+        if (!dni || !omerito || !semestre) continue;
+        // Actualizar OMERITO y codigo_carrera
+        const { error } = await supabase
+          .from('participantes')
+          .update({
+            OMERITO: omerito,
+            codigo_carrera: codigo_carrera || null
+          })
+          .eq('CODPOSTULANTE', dni)
+          .eq('SEMESTRE', semestre);
+        if (!error) {
+          successCount++;
+        } else {
+          console.error(`Error al actualizar DNI ${dni} en participantes:`, error.message);
+        }
+      }
+      res.json({ success: true, updatedCount: successCount });
+    } catch (error: any) {
+      console.error("Sync Participantes Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- CHARLAS Y CITAS DE COLEGIOS (SERVICE_ROLE BACKEND API) ---
+  app.post("/api/charlas/disponibilidad/generate", async (req, res) => {
+    try {
+      const { slots } = req.body;
+      if (!slots || !Array.isArray(slots) || slots.length === 0) {
+        return res.status(400).json({ error: "Arreglo de slots requerido" });
+      }
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase.from('charlas_disponibilidad').insert(slots).select();
+      if (error) throw error;
+      res.json({ success: true, count: data?.length || 0, data });
+    } catch (err: any) {
+      console.error("Error generating charlas slots:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/charlas/disponibilidad", async (req, res) => {
+    try {
+      const slot = req.body;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase.from('charlas_disponibilidad').insert([slot]).select().single();
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      console.error("Error creating charla slot:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/charlas/disponibilidad/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase.from('charlas_disponibilidad').update(updates).eq('id', id).select().single();
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      console.error("Error updating charla slot:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/charlas/disponibilidad/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { error } = await supabase.from('charlas_disponibilidad').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Error deleting charla slot:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/charlas/solicitudes/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      if (updates.reviewed_by && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updates.reviewed_by)) {
+        delete updates.reviewed_by;
+      }
+
+      const { data, error } = await supabase.from('charlas_solicitudes').update(updates).eq('id', id).select().single();
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      console.error("Error updating charla solicitud:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- CONTROL DE INGRESO DE POSTULANTES / SIMULACRO (KIOSKO & SCANNER) ---
+  app.get("/api/simulacros", async (req, res) => {
+    try {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data: simulacros, error } = await supabase
+        .from('simulacros')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Obtener conteos agrupados y desglose por sede para cada simulacro
+      const enriched = await Promise.all(
+        (simulacros || []).map(async (sim) => {
+          const { count: totalPostulantes } = await supabase
+            .from('simulacro_postulantes')
+            .select('*', { count: 'exact', head: true })
+            .eq('simulacro_id', sim.id);
+
+          const { count: totalIngresados } = await supabase
+            .from('simulacro_postulantes')
+            .select('*', { count: 'exact', head: true })
+            .eq('simulacro_id', sim.id)
+            .eq('ingreso_registrado', true);
+
+          // Obtener desglose por sede
+          const { data: sedeRows } = await supabase
+            .from('simulacro_postulantes')
+            .select('sede, ingreso_registrado')
+            .eq('simulacro_id', sim.id);
+
+          const sedesStats: Record<string, { total: number; ingresados: number }> = {};
+          (sedeRows || []).forEach(p => {
+            const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
+            if (!sedesStats[sName]) {
+              sedesStats[sName] = { total: 0, ingresados: 0 };
+            }
+            sedesStats[sName].total++;
+            if (p.ingreso_registrado) {
+              sedesStats[sName].ingresados++;
+            }
+          });
+
+          return {
+            ...sim,
+            total_postulantes: totalPostulantes || 0,
+            total_ingresados: totalIngresados || 0,
+            sedes_stats: sedesStats
+          };
+        })
+      );
+
+      res.json({ success: true, data: enriched });
+    } catch (err: any) {
+      const isMissingTable = err.code === 'PGRST205' || err.message?.includes('schema cache');
+      res.status(isMissingTable ? 404 : 500).json({ error: err.message, tableNotFound: isMissingTable });
+    }
+  });
+
+  app.post("/api/simulacros", async (req, res) => {
+    try {
+      const { nombre, fecha, estado } = req.body;
+      if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacros')
+        .insert([{ nombre, fecha: fecha || new Date().toISOString().split('T')[0], estado: estado || 'Activo' }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data: { ...data, total_postulantes: 0, total_ingresados: 0, sedes_stats: {} } });
+    } catch (err: any) {
+      const isMissingTable = err.code === 'PGRST205' || err.message?.includes('schema cache');
+      res.status(isMissingTable ? 404 : 500).json({ error: err.message, tableNotFound: isMissingTable });
+    }
+  });
+
+  app.patch("/api/simulacros/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacros')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/simulacros/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Eliminar postulantes y simulacro
+      await supabase.from('simulacro_postulantes').delete().eq('simulacro_id', id);
+      const { error } = await supabase.from('simulacros').delete().eq('id', id);
+      if (error) throw error;
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/simulacros/:id/postulantes", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacro_postulantes')
+        .select('*')
+        .eq('simulacro_id', id)
+        .order('dni', { ascending: true });
+
+      if (error) throw error;
+
+      // Normalizar nombres_apellidos para compatibilidad total
+      const normalized = (data || []).map((p: any) => ({
+        ...p,
+        nombres_apellidos: p.nombres_apellidos || [p.apellidos, p.nombres].filter(Boolean).join(' ') || 'SIN NOMBRE'
+      }));
+
+      res.json({ success: true, data: normalized });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/simulacros/:id/postulantes/bulk", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { postulantes } = req.body;
+      if (!Array.isArray(postulantes) || postulantes.length === 0) {
+        return res.status(400).json({ error: "Arreglo de postulantes requerido" });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Inserción en bloques de 500 registros para alta velocidad sin saturar conexión
+      const chunkSize = 500;
+      let insertedCount = 0;
+      for (let i = 0; i < postulantes.length; i += chunkSize) {
+        const chunk = postulantes.slice(i, i + chunkSize).map(p => {
+          const fullNombre = String(
+            p.nombres_apellidos || 
+            [p.apellidos, p.nombres].filter(Boolean).join(' ') || 
+            ''
+          ).trim().toUpperCase();
+
+          return {
+            simulacro_id: id,
+            dni: String(p.dni || '').trim(),
+            nombres_apellidos: fullNombre,
+            apellidos: fullNombre, // Compatibilidad si apellidos todavía tiene NOT NULL en BD
+            nombres: String(p.nombres || '').trim().toUpperCase(),
+            sede: String(p.sede || 'SEDE CENTRAL').trim().toUpperCase(),
+            aula: String(p.aula || '').trim().toUpperCase(),
+            carpeta: String(p.carpeta || '').trim().toUpperCase(),
+            carrera: String(p.carrera || '').trim().toUpperCase(),
+            grupo: String(p.grupo || 'ÚNICO').trim().toUpperCase(),
+            ingreso_registrado: Boolean(p.ingreso_registrado),
+            hora_ingreso: p.hora_ingreso || null
+          };
+        });
+
+        const { error } = await supabase
+          .from('simulacro_postulantes')
+          .upsert(chunk, { onConflict: 'simulacro_id,dni' });
+
+        if (error) {
+          // Si la columna nombres_apellidos aún no fue agregada en Supabase, reintentar sin ella
+          if (error.message?.includes('nombres_apellidos') || (error as any).code === 'PGRST204') {
+            const fallbackChunk = chunk.map(({ nombres_apellidos, ...rest }: any) => rest);
+            const { error: errFallback } = await supabase
+              .from('simulacro_postulantes')
+              .upsert(fallbackChunk, { onConflict: 'simulacro_id,dni' });
+            if (errFallback) throw errFallback;
+          } else {
+            throw error;
+          }
+        }
+        insertedCount += chunk.length;
+      }
+
+      res.json({ success: true, count: insertedCount });
+    } catch (err: any) {
+      console.error("Bulk upload postulantes error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch("/api/simulacros/:id/postulantes/:dni/ingreso", async (req, res) => {
+    try {
+      const { id, dni } = req.params;
+      const { hora_ingreso } = req.body;
+      const horaIngresoFinal = hora_ingreso || new Date().toISOString();
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { data, error } = await supabase
+        .from('simulacro_postulantes')
+        .update({ ingreso_registrado: true, hora_ingreso: horaIngresoFinal })
+        .eq('simulacro_id', id)
+        .eq('dni', dni)
+        .select()
+        .single();
+
+      if (error) throw error;
+      res.json({ success: true, data });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/simulacros/:id/postulantes/sync-batch", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { entries } = req.body; // array of { dni, hora_ingreso }
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return res.json({ success: true, updated: 0 });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      let updatedCount = 0;
+      for (const item of entries) {
+        if (!item.dni) continue;
+        const { error } = await supabase
+          .from('simulacro_postulantes')
+          .update({
+            ingreso_registrado: true,
+            hora_ingreso: item.hora_ingreso || new Date().toISOString()
+          })
+          .eq('simulacro_id', id)
+          .eq('dni', item.dni);
+
+        if (!error) updatedCount++;
+      }
+
+      res.json({ success: true, updated: updatedCount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/simulacros/:id/postulantes", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const { error } = await supabase
+        .from('simulacro_postulantes')
+        .delete()
+        .eq('simulacro_id', id);
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- VERIFICACIÓN OFICIAL DE CONSTANCIAS Y DOCUMENTOS ---
+  app.post("/api/verificacion/emitir", async (req, res) => {
+    try {
+      const payload = req.body;
+      const { verificationCode } = payload;
+      if (!verificationCode) {
+        return res.status(400).json({ error: "verificationCode es requerido" });
+      }
+
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      const destinationMeta = {
+        tipo_documento: payload.documentType || 'CONSTANCIA DE INGRESO',
+        estudiante_nombre: payload.studentName || '',
+        estudiante_dni: payload.studentDni || '',
+        estudiante_codigo: payload.studentCode || '',
+        carrera: payload.career || '',
+        modalidad: payload.modality || '',
+        semestre: payload.semester || '',
+        puntaje: payload.score || '',
+        orden_merito: payload.meritOrder || '',
+        fecha_ingreso: payload.admissionDate || '',
+        expediente_numero: payload.expNumber || '',
+        recibo_pago: payload.receiptNumber || '',
+        usuario_nombre: payload.userName || '',
+        usuario_iniciales: (payload.userInitials === 'JAL' || (payload.userName && payload.userName.toUpperCase().includes('JHONATAN'))) ? 'JCH' : (payload.userInitials || 'DA'),
+        fecha_emision: payload.issuedAt || new Date().toISOString()
+      };
+
+      const docRecord = {
+        doc_type: payload.documentType || 'Constancia Oficial',
+        doc_number: verificationCode,
+        ref_number: payload.studentDni || payload.studentCode || payload.expNumber || 'OFICIAL',
+        subject: `${payload.documentType || 'CONSTANCIA DE INGRESO'} - ${payload.studentName || 'ESTUDIANTE'} - ${payload.career || 'UNSAAC'}`,
+        destination: JSON.stringify(destinationMeta),
+        status: 'Finalizado'
+      };
+
+      // 1. Guardar en Supabase
+      const { data: inserted, error: supaErr } = await supabase
+        .from('expedientes_salida')
+        .insert([docRecord])
+        .select()
+        .maybeSingle();
+
+      if (supaErr) {
+        console.warn("Supabase emission insert warning:", supaErr.message);
+      }
+
+      // 2. Persistir localmente en disco como respaldo de auditoría
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const dataDir = path.resolve('data');
+        if (!fs.existsSync(dataDir)) {
+          fs.mkdirSync(dataDir, { recursive: true });
+        }
+        const filePath = path.join(dataDir, 'documentos_verificacion.json');
+        let records: Record<string, any> = {};
+        if (fs.existsSync(filePath)) {
+          try {
+            records = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          } catch(e) {}
+        }
+        records[verificationCode] = {
+          ...payload,
+          dbId: inserted?.id,
+          savedAt: new Date().toISOString()
+        };
+        fs.writeFileSync(filePath, JSON.stringify(records, null, 2), 'utf-8');
+      } catch (fsErr) {
+        console.warn("File storage emission warning:", fsErr);
+      }
+
+      res.json({ success: true, verificationCode, id: inserted?.id });
+    } catch (err: any) {
+      console.error("Error registrando emisión:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/verificacion/:code", async (req, res) => {
+    try {
+      const code = decodeURIComponent(req.params.code).trim();
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // 1. Buscar en Supabase
+      const { data, error } = await supabase
+        .from('expedientes_salida')
+        .select('*')
+        .or(`doc_number.eq.${code},id.eq.${code}`)
+        .maybeSingle();
+
+      if (data) {
+        let meta: any = {};
+        try {
+          if (data.destination && data.destination.startsWith('{')) {
+            meta = JSON.parse(data.destination);
+          }
+        } catch(e) {}
+
+        return res.json({
+          valid: true,
+          verificationCode: data.doc_number || code,
+          documentType: meta.tipo_documento || data.doc_type || 'CONSTANCIA DE INGRESO',
+          student: {
+            name: meta.estudiante_nombre || (data.subject ? data.subject.split('-')[1]?.trim() : ''),
+            dni: meta.estudiante_dni || data.ref_number || '',
+            code: meta.estudiante_codigo || data.ref_number || '',
+            career: meta.carrera || (data.subject ? data.subject.split('-')[2]?.trim() : ''),
+            modality: meta.modalidad || '',
+            semester: meta.semestre || '',
+            score: meta.puntaje || '',
+            meritOrder: meta.orden_merito || '',
+            admissionDate: meta.fecha_ingreso || ''
+          },
+          issue: {
+            date: meta.fecha_emision || data.created_at,
+            expNumber: meta.expediente_numero || '',
+            receiptNumber: meta.recibo_pago || '',
+            userName: meta.usuario_nombre || '',
+            userInitials: meta.usuario_iniciales || 'DA'
+          }
+        });
+      }
+
+      // 2. Buscar en almacenamiento local como respaldo
+      try {
+        const fs = await import('fs');
+        const path = await import('path');
+        const filePath = path.resolve('data/documentos_verificacion.json');
+        if (fs.existsSync(filePath)) {
+          const records = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          if (records[code]) {
+            const item = records[code];
+            return res.json({
+              valid: true,
+              verificationCode: code,
+              documentType: item.documentType || 'CONSTANCIA DE INGRESO',
+              student: {
+                name: item.studentName || '',
+                dni: item.studentDni || '',
+                code: item.studentCode || '',
+                career: item.career || '',
+                modality: item.modality || '',
+                semester: item.semester || '',
+                score: item.score || '',
+                meritOrder: item.meritOrder || '',
+                admissionDate: item.admissionDate || ''
+              },
+              issue: {
+                date: item.issuedAt || new Date().toISOString(),
+                expNumber: item.expNumber || '',
+                receiptNumber: item.receiptNumber || '',
+                userName: item.userName || '',
+                userInitials: item.userInitials || 'DA'
+              }
+            });
+          }
+        }
+      } catch(e) {}
+
+      res.status(404).json({ valid: false, error: "Documento no encontrado o no registrado" });
+    } catch (err: any) {
+      console.error("Error verificando documento:", err);
+      res.status(500).json({ valid: false, error: err.message });
+    }
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // In production, serve static files from dist
+    app.use(express.static("dist"));
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

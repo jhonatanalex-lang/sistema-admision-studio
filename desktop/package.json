@@ -1,0 +1,84 @@
+{
+  "name": "sistema-admision-desktop",
+  "version": "1.0.39",
+  "description": "Sistema de Admision UNSAAC - Modulo de Control de Ingreso, Impresion Termica Silenciosa 80mm y Kiosko",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.1.7"
+  },
+  "devDependencies": {
+    "electron": "^29.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.admision.backupapp",
+    "productName": "SistemaAdmision",
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      {
+        "from": "../dist",
+        "to": "frontend/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../backend/dist",
+        "to": "backend/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../../backend/package.json",
+        "to": "backend/package.json"
+      },
+      {
+        "from": "../../backend/node_modules",
+        "to": "backend/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "biometric",
+        "to": "biometric",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "verifyUpdateCodeSignature": false,
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "jhonatanalex-lang",
+        "repo": "sistema-admision-web",
+        "releaseType": "release"
+      }
+    ]
+  }
+}
