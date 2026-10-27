@@ -599,6 +599,9 @@ export interface Simulacro {
   total_postulantes?: number;
   total_ingresados?: number;
   sedes_stats?: Record<string, { total: number; ingresados: number }>;
+  calif_total_evaluados?: number;
+  calif_total_ingresantes?: number;
+  calif_fecha?: string;
 }
 
 export interface SimulacroPostulante {
@@ -633,6 +636,8 @@ export interface SimulacroResultadoItem {
   isNsp: boolean;
   observacion: string; // 'INGRESANTE' | '' | 'NSP'
   vacanteAsignada?: boolean;
+  merito_carrera?: number;
+  merito_area?: number;
 }
 
 export interface SimulacroComisionMiembro {

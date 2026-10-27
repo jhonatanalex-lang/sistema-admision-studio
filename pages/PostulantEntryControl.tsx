@@ -218,11 +218,20 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                 }
               });
 
+              const { data: calif } = await supabase
+                .from('simulacro_calificaciones')
+                .select('total_evaluados, total_ingresantes, fecha_calificacion')
+                .eq('simulacro_id', s.id)
+                .maybeSingle();
+
               return {
                 ...s,
                 total_postulantes: tot,
                 total_ingresados: ing,
                 sedes_stats: sedesStats,
+                calif_total_evaluados: calif?.total_evaluados,
+                calif_total_ingresantes: calif?.total_ingresantes,
+                calif_fecha: calif?.fecha_calificacion
               };
             } catch (err) {
               return { ...s, total_postulantes: 0, total_ingresados: 0, sedes_stats: {} };
@@ -1262,7 +1271,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
               <span>Avance por Sede:</span>
             </span>
             <div className="flex items-center gap-2 flex-1 overflow-x-auto hide-scrollbar">
-              {Object.entries(kioskSedesStats).map(([sName, sStat]) => {
+              {Object.entries(kioskSedesStats).map(([sName, sStat]: [string, any]) => {
                 const sPct = sStat.total > 0 ? Math.round((sStat.ingresados / sStat.total) * 1000) / 10 : 0;
                 return (
                   <div
@@ -1310,7 +1319,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
 
               {/* Resumen rápido de sedes activas */}
               <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
-                {Object.entries(kioskSedesStats).map(([sName, sStat]) => (
+                {Object.entries(kioskSedesStats).map(([sName, sStat]: [string, any]) => (
                   <span key={sName} className="px-3 py-1 rounded-xl bg-slate-900 border border-slate-800 text-[11px] font-mono text-slate-300">
                     📍 {sName}: <strong className="text-emerald-400">{sStat.ingresados}</strong> / {sStat.total}
                   </span>
@@ -1741,7 +1750,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                         <span>Avance por Sede:</span>
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {sedesEntries.map(([sName, sStat]) => {
+                        {sedesEntries.map(([sName, sStat]: [string, any]) => {
                           const sPct = sStat.total > 0 ? Math.round((sStat.ingresados / sStat.total) * 100) : 0;
                           return (
                             <div
@@ -1777,11 +1786,22 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                   {(user.role === 'Administrador' || user.role === 'Director') && (
                     <button
                       onClick={() => handleOpenCalificacionModal(sim)}
-                      className="w-full py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm active:scale-95"
+                      className={`w-full py-2.5 px-3 rounded-xl border font-black text-[11px] uppercase tracking-wider flex items-center justify-between gap-2 transition-all shadow-sm active:scale-95 ${
+                        sim.calif_total_evaluados
+                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200'
+                      }`}
                       title="Calificación de exámenes, ajuste de puntos y reportes oficiales en PDF"
                     >
-                      <span className="material-symbols-outlined text-[16px] text-amber-700">grade</span>
-                      <span>Calificación y Resultados</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`material-symbols-outlined text-[16px] ${sim.calif_total_evaluados ? 'text-emerald-700' : 'text-amber-700'}`}>grade</span>
+                        <span>Calificación y Resultados</span>
+                      </div>
+                      {sim.calif_total_evaluados ? (
+                        <span className="text-[10px] font-bold bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full">
+                          {sim.calif_total_evaluados} Evaluados
+                        </span>
+                      ) : null}
                     </button>
                   )}
 

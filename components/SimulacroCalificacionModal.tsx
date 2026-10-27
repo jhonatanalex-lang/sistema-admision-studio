@@ -168,21 +168,71 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
         if (isMounted) setLoadingPadron(false);
       }
 
-      // 1. Cargar calificaciones previas desde caché local
+      // 0. Cargar primero desde la base de datos formal de Supabase (tablas simulacro_calificaciones y simulacro_resultados)
       let cargadoPreviamente = false;
       try {
-        const cached = localStorage.getItem(getStorageKey(simulacro.id));
-        if (cached && isMounted) {
-          const parsed = JSON.parse(cached);
-          if (parsed.configuracion) setConfig(parsed.configuracion);
-          if (Array.isArray(parsed.resultados) && parsed.resultados.length > 0) {
-            setResultados(parsed.resultados);
-            setUploadedFileName(parsed.archivo_nombre || 'Archivo guardado previamente');
+        const { data: dbCalif, error: errCalif } = await supabase
+          .from('simulacro_calificaciones')
+          .select('*')
+          .eq('simulacro_id', simulacro.id)
+          .maybeSingle();
+
+        if (dbCalif && isMounted) {
+          if (dbCalif.configuracion) setConfig(dbCalif.configuracion);
+          if (dbCalif.archivo_nombre) setUploadedFileName(dbCalif.archivo_nombre);
+
+          // Obtener los resultados detallados fila por fila
+          const { data: dbResultados, error: errRes } = await supabase
+            .from('simulacro_resultados')
+            .select('*')
+            .eq('simulacro_id', simulacro.id)
+            .order('merito_general', { ascending: true, nullsFirst: false });
+
+          if (Array.isArray(dbResultados) && dbResultados.length > 0 && isMounted) {
+            const mappedResultados: SimulacroResultadoItem[] = dbResultados.map((r: any, idx: number) => ({
+              num: r.merito_general || (idx + 1),
+              dni: r.dni,
+              nombres: r.nombres,
+              sede: r.sede || 'SEDE CENTRAL',
+              area: r.area || 'A',
+              carrera: r.carrera || 'SIN CARRERA',
+              aula: r.aula || '',
+              carpeta: r.carpeta || '',
+              notaBase: r.is_nsp || r.nota_base === null ? 'NSP' : Number(r.nota_base),
+              bono: Number(r.bono || 0),
+              notaFinal: r.is_nsp || r.nota_final === null ? 'NSP' : Number(r.nota_final),
+              isNsp: Boolean(r.is_nsp),
+              observacion: r.observacion || '',
+              vacanteAsignada: Boolean(r.vacante_asignada),
+              merito_carrera: r.merito_carrera || undefined,
+              merito_area: r.merito_area || undefined
+            }));
+
+            setResultados(mappedResultados);
             setActiveTab('resultados');
             cargadoPreviamente = true;
           }
         }
-      } catch (e) {}
+      } catch (errDb) {
+        console.warn('Error recuperando calificaciones de Supabase DB:', errDb);
+      }
+
+      // 1. Si no estaba en Supabase DB, buscar en caché local
+      if (!cargadoPreviamente) {
+        try {
+          const cached = localStorage.getItem(getStorageKey(simulacro.id));
+          if (cached && isMounted) {
+            const parsed = JSON.parse(cached);
+            if (parsed.configuracion) setConfig(parsed.configuracion);
+            if (Array.isArray(parsed.resultados) && parsed.resultados.length > 0) {
+              setResultados(parsed.resultados);
+              setUploadedFileName(parsed.archivo_nombre || 'Archivo guardado previamente');
+              setActiveTab('resultados');
+              cargadoPreviamente = true;
+            }
+          }
+        } catch (e) {}
+      }
 
       // 2. Si no estaba en localStorage, recuperar desde el backend local (puerto 5000)
       if (!cargadoPreviamente) {
@@ -548,7 +598,7 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
     setIsProcessing(false);
     setActiveTab('resultados');
     // AUTO-GUARDADO INMEDIATO (Local Storage + Backend Local + Supabase)
-    persistirCalificaciones(clasificados, fileName, config, false);
+    persistirCalificaciones(clasificados, uploadedFileName || 'Archivo procesado', config, false);
     notify?.(`Calificación completada: ${clasificados.length} postulantes evaluados y guardados automáticamente.`, 'success');
   };
 
@@ -756,14 +806,88 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
       updated_at: new Date().toISOString()
     };
 
-    // 1. Guardar en localStorage inmediatamente
+    // 1. Guardar en Base de Datos formal de Supabase (simulacro_calificaciones y simulacro_resultados)
+    try {
+      const totalEvaluados = itemsAGuardar.filter(i => !i.isNsp && i.notaFinal !== 'NSP').length;
+      const totalNsp = itemsAGuardar.filter(i => i.isNsp || i.notaFinal === 'NSP').length;
+      const totalIngresantes = itemsAGuardar.filter(i => i.vacanteAsignada || i.observacion === 'INGRESANTE').length;
+      const notasNumericas = itemsAGuardar
+        .map(i => typeof i.notaFinal === 'number' ? i.notaFinal : (typeof i.notaBase === 'number' ? i.notaBase : null))
+        .filter((n): n is number => n !== null);
+      const notaMaxima = notasNumericas.length > 0 ? Math.max(...notasNumericas) : 0;
+      const notaMinima = notasNumericas.length > 0 ? Math.min(...notasNumericas) : 0;
+      const notaPromedio = notasNumericas.length > 0 
+        ? Number((notasNumericas.reduce((acc, curr) => acc + curr, 0) / notasNumericas.length).toFixed(3)) 
+        : 0;
+
+      const { data: califRow, error: califErr } = await supabase
+        .from('simulacro_calificaciones')
+        .upsert({
+          simulacro_id: simulacro.id,
+          archivo_nombre: payload.archivo_nombre,
+          configuracion: cfgAGuardar,
+          total_evaluados: totalEvaluados,
+          total_nsp: totalNsp,
+          total_ingresantes: totalIngresantes,
+          nota_maxima: notaMaxima,
+          nota_minima: notaMinima,
+          nota_promedio: notaPromedio,
+          fecha_calificacion: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'simulacro_id' })
+        .select('id')
+        .single();
+
+      if (califErr) {
+        console.warn('Error guardando cabecera en simulacro_calificaciones:', califErr);
+      }
+
+      const calificacionId = califRow?.id;
+      const rowsToInsert = itemsAGuardar.map((item, idx) => ({
+        simulacro_id: simulacro.id,
+        calificacion_id: calificacionId || null,
+        dni: String(item.dni || '').trim(),
+        nombres: item.nombres || '',
+        sede: item.sede || '',
+        area: item.area || '',
+        carrera: item.carrera || '',
+        aula: item.aula || '',
+        carpeta: item.carpeta || '',
+        nota_base: typeof item.notaBase === 'number' ? item.notaBase : null,
+        bono: typeof item.bono === 'number' ? item.bono : 0,
+        nota_final: typeof item.notaFinal === 'number' ? item.notaFinal : null,
+        is_nsp: Boolean(item.isNsp || item.notaBase === 'NSP' || item.notaFinal === 'NSP'),
+        observacion: item.observacion || '',
+        vacante_asignada: Boolean(item.vacanteAsignada),
+        merito_general: item.num || (idx + 1),
+        merito_carrera: item.merito_carrera || null,
+        merito_area: item.merito_area || null,
+        updated_at: new Date().toISOString()
+      }));
+
+      // Inserción en lotes de 200 filas para máxima velocidad
+      const chunkSize = 200;
+      for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
+        const chunk = rowsToInsert.slice(i, i + chunkSize);
+        const { error: upsertErr } = await supabase
+          .from('simulacro_resultados')
+          .upsert(chunk, { onConflict: 'simulacro_id,dni' });
+        if (upsertErr) {
+          console.warn(`Error guardando lote ${i}-${i + chunkSize} en simulacro_resultados:`, upsertErr);
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Error persistiendo en base de datos formal Supabase:', dbErr);
+    }
+
+    // 2. Guardar en localStorage inmediatamente (Caché de sesión)
     try {
       localStorage.setItem(getStorageKey(simulacro.id), JSON.stringify(payload));
     } catch (e) {
       console.warn('Error guardando en localStorage:', e);
     }
 
-    // 2. Guardar en backend local (puerto 5000)
+    // 3. Guardar en backend local (puerto 5000)
     try {
       await fetch(`/api/simulacros/${simulacro.id}/calificaciones`, {
         method: 'POST',
@@ -774,7 +898,7 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
       console.warn('Error guardando en backend local:', e);
     }
 
-    // 3. Guardar en Supabase Storage (en la nube, bucket permanente 'archivos')
+    // 4. Guardar copia de seguridad en Supabase Storage
     try {
       const storagePath = `simulacros/calificaciones_${simulacro.id}.json`;
       await supabase.storage
@@ -786,19 +910,6 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
     } catch (e) {
       console.warn('Error guardando en Supabase storage:', e);
     }
-
-    // 4. Intentar guardar en Supabase tabla simulacro_calificaciones si existe
-    try {
-      await supabase
-        .from('simulacro_calificaciones')
-        .upsert({
-          simulacro_id: simulacro.id,
-          archivo_nombre: payload.archivo_nombre,
-          configuracion: cfgAGuardar,
-          resultados: itemsAGuardar,
-          fecha_calificacion: new Date().toISOString()
-        }, { onConflict: 'simulacro_id' });
-    } catch (e) {}
 
     setSavingState(false);
     if (showToast) {
@@ -820,6 +931,10 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
       } catch (e) {}
       try {
         await fetch(`/api/simulacros/${simulacro.id}/calificaciones`, { method: 'DELETE' });
+      } catch (e) {}
+      try {
+        await supabase.from('simulacro_resultados').delete().eq('simulacro_id', simulacro.id);
+        await supabase.from('simulacro_calificaciones').delete().eq('simulacro_id', simulacro.id);
       } catch (e) {}
       try {
         await supabase.storage.from('archivos').remove([`simulacros/calificaciones_${simulacro.id}.json`]);
@@ -1093,7 +1208,7 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
               <span className="material-symbols-outlined text-lg">tune</span>
               <span>2. Ajuste de Puntos</span>
               {((config.bono_general || 0) > 0 ||
-                Object.values(config.bono_areas).some(v => v > 0) ||
+                Object.values(config.bono_areas).some(v => Number(v) > 0) ||
                 (config.bono_umbral_activo && (config.bono_umbral_puntos || 0) > 0)) && (
                 <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
               )}
@@ -1665,7 +1780,7 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
                       onClick={() => setActiveTab('ajustes')}
                       className={`px-3 py-1.5 rounded-lg font-bold text-[11px] uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
                         (config.bono_general || 0) > 0 ||
-                        Object.values(config.bono_areas).some(v => v > 0) ||
+                        Object.values(config.bono_areas).some(v => Number(v) > 0) ||
                         (config.bono_umbral_activo && (config.bono_umbral_puntos || 0) > 0)
                           ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200'
                           : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border-indigo-200'
@@ -1675,7 +1790,7 @@ export const SimulacroCalificacionModal: React.FC<SimulacroCalificacionModalProp
                       <span className="material-symbols-outlined text-sm">tune</span>
                       <span>Configurar Bonificaciones</span>
                       {((config.bono_general || 0) > 0 ||
-                        Object.values(config.bono_areas).some(v => v > 0) ||
+                        Object.values(config.bono_areas).some(v => Number(v) > 0) ||
                         (config.bono_umbral_activo && (config.bono_umbral_puntos || 0) > 0)) && (
                         <span className="size-2 rounded-full bg-amber-600 animate-pulse" />
                       )}
