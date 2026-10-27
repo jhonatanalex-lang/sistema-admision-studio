@@ -812,16 +812,19 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           }
 
           // 1. Register Outgoing
-          const { error } = await supabase.from('expedientes_salida').insert([{
+          const outgoingInsertPayload: Record<string, any> = {
               doc_type: outgoingDocType,
               doc_number: outgoingDocNumber.trim(),
               ref_number: outgoingRefNumber.trim(),
               subject: outgoingSubject.trim().toUpperCase(),
               destination: outgoingDestination.trim().toUpperCase(),
               status: 'Pendiente',
-              pdf_url: publicUrl,
-              created_by: user.id
-          }]);
+              pdf_url: publicUrl
+          };
+          if (user?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)) {
+              outgoingInsertPayload.created_by = user.id;
+          }
+          const { error } = await supabase.from('expedientes_salida').insert([outgoingInsertPayload]);
           if (error) throw error;
 
           // Registrar en auditoría la salida manual
@@ -962,27 +965,79 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       setPaymentCandidates(data || []);
   };
 
+  const extractReportSequence = (rawDocNumber?: string | null, rawDocType?: string | null, targetYear?: number): number | null => {
+      if (!rawDocNumber) return null;
+      const text = String(rawDocNumber).trim().toUpperCase();
+      const year = targetYear || new Date().getFullYear();
+
+      // Descartar documentos que pertenecen a otra numeración (REP., OFICIO, CARTA, CIRCULAR, PROVEIDO, CONSTANCIAS)
+      if (/^(REP\.?\b|OFICIO\b|CARTA\b|CIRCULAR\b|PROVE[IÍ]DO\b|UNSAAC-)/.test(text)) {
+          return null;
+      }
+
+      // Caso 1: Formato explícito "INFORME 139-2026", "INFORME N° 139-2026", "INFORME DE ... 139 - 2026(-DA-UNSAAC)"
+      const explicitMatch = new RegExp(`INFORME(?:\\s+[A-ZÁÉÍÓÚÑ.°º]+)*?\\s*(\\d{1,5})\\s*-\\s*${year}(?:\\b|-)`).exec(text);
+      if (explicitMatch) {
+          const seq = parseInt(explicitMatch[1], 10);
+          return !isNaN(seq) ? seq : null;
+      }
+
+      // Caso 2: Registro manual con doc_type que incluye "INFORME" y número limpio como "064 - 2026"
+      if (rawDocType && String(rawDocType).toUpperCase().includes('INFORME')) {
+          const numericOnlyMatch = new RegExp(`^(\\d{1,5})\\s*-\\s*${year}(?:\\b|-)`).exec(text);
+          if (numericOnlyMatch) {
+              const seq = parseInt(numericOnlyMatch[1], 10);
+              return !isNaN(seq) ? seq : null;
+          }
+      }
+
+      return null;
+  };
+
   const getNextReportNumber = async () => {
       const currentYear = new Date().getFullYear();
-      const { data } = await supabase
-          .from('expedientes_salida')
-          .select('doc_number')
-          .eq('doc_type', 'Informe')
-          .ilike('doc_number', `INFORME %-${currentYear}`);
-      
       let maxSeq = 0;
-      if (data && data.length > 0) {
-          data.forEach(item => {
-              // Expected format: "INFORME 001-2026"
-              // Remove "INFORME " prefix
-              const clean = item.doc_number.replace('INFORME ', '');
-              const parts = clean.split('-');
-              if (parts.length === 2) {
-                  const seq = parseInt(parts[0], 10);
-                  if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
-              }
+
+      try {
+          const [salidasRes, renunciasRes] = await Promise.all([
+              supabase
+                  .from('expedientes_salida')
+                  .select('doc_type, doc_number')
+                  .or(`doc_number.ilike.%INFORME%${currentYear}%,and(doc_type.ilike.%informe%,doc_number.ilike.%${currentYear}%)`)
+                  .order('created_at', { ascending: false })
+                  .limit(2000),
+              supabase
+                  .from('renuncias')
+                  .select('informe_number')
+                  .ilike('informe_number', `%${currentYear}%`)
+                  .order('created_at', { ascending: false })
+                  .limit(1000)
+          ]);
+
+          let salidasRows = salidasRes.data || [];
+          if (salidasRes.error) {
+              const fallbackRes = await supabase
+                  .from('expedientes_salida')
+                  .select('doc_type, doc_number')
+                  .ilike('doc_number', `%${currentYear}%`)
+                  .order('created_at', { ascending: false })
+                  .limit(2000);
+              salidasRows = fallbackRes.data || [];
+          }
+
+          salidasRows.forEach((item: any) => {
+              const seq = extractReportSequence(item.doc_number, item.doc_type, currentYear);
+              if (seq !== null && seq > maxSeq) maxSeq = seq;
           });
+
+          (renunciasRes.data || []).forEach((item: any) => {
+              const seq = extractReportSequence(item.informe_number, 'INFORME', currentYear);
+              if (seq !== null && seq > maxSeq) maxSeq = seq;
+          });
+      } catch (err) {
+          console.error('Error al calcular correlativo de informe:', err);
       }
+
       return `INFORME ${(maxSeq + 1).toString().padStart(3, '0')}-${currentYear}`;
   };
 
@@ -1570,7 +1625,11 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               const issuedDocType = isReport 
                 ? (selectedTemplate?.name || 'INFORME DE RECTIFICACIÓN DE DATOS') 
                 : (selectedTemplate?.name || (isConstancia ? 'CONSTANCIA DE INGRESO' : 'INFORME TÉCNICO'));
-              const issuedDocNumber = manualValues['INFORME'] || manualValues['CONSTANCIA'] || (qrInfo?.code ? qrInfo.code : `INF-${fileToAttend.number}`);
+              const rawInformeVal = (manualValues['INFORME'] || '').trim();
+              const normalizedInformeVal = rawInformeVal && /^\d{1,5}\s*-\s*\d{4}$/.test(rawInformeVal)
+                ? `INFORME ${rawInformeVal.replace(/\s+/g, '')}`
+                : rawInformeVal.toUpperCase();
+              const issuedDocNumber = normalizedInformeVal || (manualValues['CONSTANCIA'] || '').trim() || (qrInfo?.code ? qrInfo.code : `INF-${fileToAttend.number}`);
               const initials = getUserInitials(user);
 
               const hasCorrectedName = Boolean(manualValues['NOMBRECORRE'] && manualValues['NOMBRECORRE'].trim());
@@ -1593,16 +1652,21 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 fecha_emision: new Date().toISOString()
               };
 
-              await supabase.from('expedientes_salida').insert([{
+              const salidaInsertPayload: Record<string, any> = {
                   doc_type: issuedDocType,
                   doc_number: issuedDocNumber,
                   ref_number: fileToAttend.number,
                   subject: `${issuedDocType} - ${studentFinalName || fileToAttend.subject}`,
                   destination: JSON.stringify(destinationMeta),
                   status: 'Finalizado',
-                  pdf_url: urlData.publicUrl,
-                  created_by: user.id
-              }]);
+                  pdf_url: urlData.publicUrl
+              };
+              if (user?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user.id)) {
+                  salidaInsertPayload.created_by = user.id;
+              }
+
+              const { error: salidaInsertError } = await supabase.from('expedientes_salida').insert([salidaInsertPayload]);
+              if (salidaInsertError) throw salidaInsertError;
 
               // Registrar en auditoría central
               try {
@@ -1668,13 +1732,17 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           }
 
               if (fileToAttend.subject.toUpperCase().includes('RENUNCIA')) {
+                  const rawRenunciaInf = (manualValues['INFORME'] || '').trim();
+                  const normalizedRenunciaInf = rawRenunciaInf && /^\d{1,5}\s*-\s*\d{4}$/.test(rawRenunciaInf)
+                    ? `INFORME ${rawRenunciaInf.replace(/\s+/g, '')}`
+                    : rawRenunciaInf.toUpperCase();
                   await supabase.from('renuncias').insert([{
                       student_name: selectedStudent.NOMBRE,
                       student_code: selectedStudent.CODPOSTULANTE,
                       school: selectedStudent.CARRERA,
                       semester: selectedStudent.SEMESTRE || '',
                       expediente_number: fileToAttend.number,
-                      informe_number: manualValues['INFORME'],
+                      informe_number: normalizedRenunciaInf || manualValues['INFORME'],
                       informe_pdf: urlData.publicUrl,
                       status: 'Pendiente Resolución'
                   }]);
@@ -2590,6 +2658,21 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                                     Nombre Rectificado
                                                                 </span>
                                                             )}
+                                                            {variable === 'INFORME' && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={async (e) => {
+                                                                        e.preventDefault();
+                                                                        const nextNum = await getNextReportNumber();
+                                                                        setManualValues(prev => ({ ...prev, INFORME: nextNum }));
+                                                                    }}
+                                                                    className="text-[9px] font-black text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 transition-colors"
+                                                                    title="Sincronizar con el último correlativo registrado"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-[12px]">sync</span>
+                                                                    Correlativo automático
+                                                                </button>
+                                                            )}
                                                         </div>
                                                         <input 
                                                             value={manualValues[variable] || ''}
@@ -2852,7 +2935,20 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                       <div className="grid grid-cols-2 gap-4">
                           <label className="flex flex-col gap-1">
                               <span className="text-[10px] font-black text-slate-500 uppercase">Tipo</span>
-                              <select value={outgoingDocType} onChange={e => setOutgoingDocType(e.target.value)} className="h-12 px-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-sm font-bold"><option>Oficio</option><option>Informe</option><option>Circular</option><option>Carta</option><option>Proveido</option></select>
+                              <select
+                                value={outgoingDocType}
+                                onChange={async e => {
+                                  const nextType = e.target.value;
+                                  setOutgoingDocType(nextType);
+                                  if (nextType === 'Informe' && !outgoingDocNumber.trim()) {
+                                    const nextNum = await getNextReportNumber();
+                                    setOutgoingDocNumber(nextNum);
+                                  }
+                                }}
+                                className="h-12 px-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-sm font-bold"
+                              >
+                                <option>Oficio</option><option>Informe</option><option>Circular</option><option>Carta</option><option>Proveido</option>
+                              </select>
                           </label>
                           <label className="flex flex-col gap-1">
                               <span className="text-[10px] font-black text-slate-500 uppercase">Nº Documento</span>
