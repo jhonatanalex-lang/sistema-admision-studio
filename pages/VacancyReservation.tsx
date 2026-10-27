@@ -146,6 +146,10 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
   const [modResPdf, setModResPdf] = useState('');
   const [uploadingModPdf, setUploadingModPdf] = useState(false);
 
+  // PDF Export Options (Include / Exclude Observaciones)
+  const [pdfIncludeObservations, setPdfIncludeObservations] = useState<boolean>(true);
+  const [pdfBatchToDownload, setPdfBatchToDownload] = useState<VacancyReservationBatch | null>(null);
+
   const csvInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const modPdfInputRef = useRef<HTMLInputElement>(null);
@@ -222,6 +226,101 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
     }
   };
 
+  // Función de saneamiento de texto para reportes PDF y listas
+  // Evita caracteres corruptos (\uFFFD / mojibake) que activan modo UTF-16BE en jsPDF Type 1 (Helvetica)
+  // lo cual provoca letras espaciadas con caracteres nulos \x00 y símbolos como ÿý.
+  const cleanPdfText = (text: string | null | undefined): string => {
+      if (!text) return '';
+      let s = String(text);
+
+      // Reemplazos de nombres y términos peruanos comunes con caracteres corruptos
+      s = s.replace(/A\uFFFDO/gi, 'AÑO')
+           .replace(/CALLA\uFFFDAUPA/gi, 'CALLAÑAUPA')
+           .replace(/RODR\uFFFDGUEZ/gi, 'RODRIGUEZ')
+           .replace(/RODR\uFFFD/gi, 'RODRIGUEZ')
+           .replace(/PE\uFFFDA/gi, 'PEÑA')
+           .replace(/NU\uFFFD+EZ/gi, 'NUÑEZ')
+           .replace(/IBA\uFFFD+EZ/gi, 'IBAÑEZ')
+           .replace(/MU\uFFFD+OZ/gi, 'MUÑOZ')
+           .replace(/CA\uFFFD+ARI/gi, 'CAÑARI')
+           .replace(/CCA\uFFFD+IHUA/gi, 'CCAÑIHUA')
+           .replace(/QUI\uFFFD+ONES/gi, 'QUIÑONES')
+           .replace(/ZU\uFFFD+IGA/gi, 'ZUÑIGA')
+           .replace(/BRICE\uFFFD+O/gi, 'BRICEÑO')
+           .replace(/BOLA\uFFFD+OS/gi, 'BOLAÑOS')
+           .replace(/CASTA\uFFFD+EDA/gi, 'CASTAÑEDA')
+           .replace(/VICU\uFFFD+A/gi, 'VICUÑA')
+           .replace(/ORDO\uFFFD+EZ/gi, 'ORDOÑEZ')
+           .replace(/ACU\uFFFD+A/gi, 'ACUÑA')
+           .replace(/MA\uFFFD+ACCASA/gi, 'MAÑACCASA')
+           .replace(/SALDA\uFFFD+A/gi, 'SALDAÑA')
+           .replace(/GUTI\uFFFD+RREZ/gi, 'GUTIERREZ')
+           .replace(/D\uFFFDAZ/gi, 'DIAZ')
+           .replace(/MART\uFFFDNEZ/gi, 'MARTINEZ')
+           .replace(/BEN\uFFFDTEZ/gi, 'BENITEZ')
+           .replace(/GARC\uFFFDA/gi, 'GARCIA')
+           .replace(/GAR\uFFFDA/gi, 'GARCIA')
+           .replace(/P\uFFFDREZ/gi, 'PEREZ')
+           .replace(/S\uFFFDNCHEZ/gi, 'SANCHEZ')
+           .replace(/L\uFFFDPEZ/gi, 'LOPEZ')
+           .replace(/GONZ\uFFFDLEZ/gi, 'GONZALEZ')
+           .replace(/HERN\uFFFDNDEZ/gi, 'HERNANDEZ')
+           .replace(/RAM\uFFFDREZ/gi, 'RAMIREZ')
+           .replace(/M\uFFFDNDEZ/gi, 'MENDEZ')
+           .replace(/CH\uFFFDVEZ/gi, 'CHAVEZ')
+           .replace(/V\uFFFD[SZ]QUEZ/gi, 'VASQUEZ')
+           .replace(/C\uFFFDCERES/gi, 'CACERES')
+           .replace(/R\uFFFDOS/gi, 'RIOS')
+           .replace(/\uFFFDVILA/gi, 'AVILA')
+           .replace(/ALARC\uFFFDN/gi, 'ALARCON')
+           .replace(/CALDER\uFFFDN/gi, 'CALDERON')
+           .replace(/LE\uFFFDN/gi, 'LEON')
+           .replace(/HUAM\uFFFDN/gi, 'HUAMAN')
+           .replace(/GUILL\uFFFDN/gi, 'GUILLEN')
+           .replace(/FARF\uFFFDN/gi, 'FARFAN')
+           .replace(/DUE\uFFFD+AS/gi, 'DUEÑAS')
+           .replace(/CUMPA\uFFFD+A/gi, 'CUMPAÑA')
+           .replace(/ÑA\uFFFD+A/gi, 'ÑAÑA')
+           .replace(/CU\uFFFD+A/gi, 'CUÑA')
+           .replace(/BA\uFFFD+OS/gi, 'BAÑOS')
+           .replace(/MONTA\uFFFD+O/gi, 'MONTAÑO')
+           .replace(/CARRE\uFFFD+O/gi, 'CARREÑO')
+           .replace(/CABA\uFFFD+AS/gi, 'CABAÑAS')
+           .replace(/CAMPA\uFFFD+A/gi, 'CAMPAÑA');
+
+      // Heurística general para caracteres corruptos:
+      s = s.replace(/([AEIOU])\uFFFD+([AEIOU])/gi, '$1Ñ$2');
+      s = s.replace(/([AEIOU])\uFFFD+([BCDFGHJKLMNPQRSTVWXYZ])/gi, (m, v, c) => {
+          if (['I', 'O', 'A', 'N', 'G'].includes(c.toUpperCase())) {
+              return v + 'Ñ' + c;
+          }
+          return v + c;
+      });
+      s = s.replace(/\uFFFD/g, 'Ñ');
+
+      // Eliminar cualquier código no estándar (> 255) que rompa la tabla jsPDF
+      s = s.replace(/[^\x00-\xFF]/g, (char) => {
+          const code = char.charCodeAt(0);
+          if (code === 8211 || code === 8212) return '-';
+          if (code === 8216 || code === 8217) return "'";
+          if (code === 8220 || code === 8221) return '"';
+          if (code === 8230) return '...';
+          if (code === 8226) return '*';
+          return '';
+      });
+
+      return s.trim();
+  };
+
+  const cleanStudentName = (name: string | null | undefined): string => {
+      let s = cleanPdfText(name);
+      // Limpiar guiones conectores legacy entre apellidos y nombres (ej: AGUILAR-MATAQQUE-ANALY FIORELA -> AGUILAR MATAQQUE ANALY FIORELA)
+      if (s.includes('-')) {
+          s = s.replace(/-/g, ' ');
+      }
+      return s.replace(/\s+/g, ' ').trim();
+  };
+
   const calculateStartingSemester = (grade: string): string => {
       const g = grade.trim().toUpperCase();
       const currentYear = new Date().getFullYear();
@@ -275,7 +374,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
 
             return {
                 code: item.code,
-                name: match ? match.NOMBRE : item.name,
+                name: cleanStudentName(match ? match.NOMBRE : item.name),
                 found: matches.length > 0,
                 alreadyReserved: !!prevRes,
                 prevResolution: prevRes ? (prevRes.batch as any)?.resolution_number || 'PENDIENTE' : undefined,
@@ -333,7 +432,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
           if (detailError) throw detailError;
 
           // Generar PDF
-          generatePDFReport(batch.report_code, batch.expediente_number, selectedDetails);
+          generatePDFReport(batch.report_code, batch.expediente_number, selectedDetails, pdfIncludeObservations);
 
           if (notify) notify("Bloque guardado y reporte generado. Procesando trámites económicos...");
           setTempList([]);
@@ -345,7 +444,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
       } catch (err: any) { alert(err.message); } finally { setLoading(false); }
   };
 
-  const generatePreviewPDFReport = () => {
+  const generatePreviewPDFReport = (includeObs: boolean = pdfIncludeObservations) => {
       const doc = new jsPDF({
           orientation: 'landscape',
           unit: 'mm',
@@ -373,22 +472,64 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
       // Table
       const tableData = tempList.map((s, index) => {
           let estado = s.found ? (s.alreadyReserved ? `YA RESERVADO` : 'APTO') : 'NO ENCONTRADO';
-          let observaciones = s.observation || '-';
-          return [
-              index + 1,
-              s.code,
-              s.name,
-              s.carrera,
-              s.admissionModality,
-              s.gradeLevel,
-              observaciones,
-              estado
-          ];
+          const cleanCode = cleanPdfText(s.code);
+          const cleanName = cleanStudentName(s.name);
+          const cleanCarrera = cleanPdfText(s.carrera);
+          const cleanModality = cleanPdfText(s.admissionModality);
+          const cleanGrade = cleanPdfText(s.gradeLevel);
+          const cleanObs = cleanPdfText(s.observation || '-');
+          const cleanEstado = cleanPdfText(estado);
+
+          if (includeObs) {
+              return [
+                  index + 1,
+                  cleanCode,
+                  cleanName,
+                  cleanCarrera,
+                  cleanModality,
+                  cleanGrade,
+                  cleanObs,
+                  cleanEstado
+              ];
+          } else {
+              return [
+                  index + 1,
+                  cleanCode,
+                  cleanName,
+                  cleanCarrera,
+                  cleanModality,
+                  cleanGrade,
+                  cleanEstado
+              ];
+          }
       });
+
+      const head = includeObs
+          ? [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA', 'MODALIDAD', 'AÑO SEC.', 'OBSERVACIONES', 'ESTADO']]
+          : [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA', 'MODALIDAD', 'AÑO SEC.', 'ESTADO']];
+
+      const columnStyles = includeObs ? {
+          0: { cellWidth: 10, halign: 'center' as const },
+          1: { cellWidth: 18 },
+          2: { cellWidth: 40 },
+          3: { cellWidth: 45 },
+          4: { cellWidth: 25 },
+          5: { cellWidth: 15 },
+          6: { cellWidth: 'auto' as const },
+          7: { cellWidth: 20 }
+      } : {
+          0: { cellWidth: 12, halign: 'center' as const },
+          1: { cellWidth: 22 },
+          2: { cellWidth: 65 },
+          3: { cellWidth: 65 },
+          4: { cellWidth: 40 },
+          5: { cellWidth: 25 },
+          6: { cellWidth: 28 }
+      };
 
       autoTable(doc, {
           startY: 35,
-          head: [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA', 'MODALIDAD', 'AÑO SEC.', 'OBSERVACIONES', 'ESTADO']],
+          head: head,
           body: tableData,
           theme: 'grid',
           headStyles: { 
@@ -404,16 +545,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
               lineColor: [226, 232, 240],
               lineWidth: 0.1
           },
-          columnStyles: {
-              0: { cellWidth: 10, halign: 'center' },
-              1: { cellWidth: 18 },
-              2: { cellWidth: 40 },
-              3: { cellWidth: 45 },
-              4: { cellWidth: 25 },
-              5: { cellWidth: 15 },
-              6: { cellWidth: 'auto' },
-              7: { cellWidth: 20 }
-          },
+          columnStyles: columnStyles,
           didDrawPage: (data) => {
               doc.setFontSize(8);
               doc.setTextColor(150, 150, 150);
@@ -424,7 +556,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
       doc.save(`Reporte_Previo_Reserva_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  const generatePDFReport = (oficio: string, expediente: string, students: TempReservation[]) => {
+  const generatePDFReport = (oficio: string, expediente: string, students: TempReservation[], includeObs: boolean = true) => {
       const doc = new jsPDF({
           orientation: 'landscape',
           unit: 'mm',
@@ -449,35 +581,86 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
       doc.setLineWidth(0.5);
       doc.line(20, 26, 277, 26);
 
-      // Batch Info
+      // Batch Info: Evitar duplicar 'OFICIO Nº' si el código ya lo incluye
+      const cleanOficio = oficio.trim();
+      const displayOficio = /^OFICIO\s*(N[º°]?)?/i.test(cleanOficio)
+          ? cleanOficio.toUpperCase()
+          : `OFICIO Nº ${cleanOficio.toUpperCase()}`;
+
+      const cleanExp = expediente.trim();
+      const displayExp = /^EXP(EDIENTE)?[:\s]/i.test(cleanExp)
+          ? cleanExp
+          : `Expediente: ${cleanExp}`;
+
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(0, 0, 0);
-      doc.text(`OFICIO Nº ${oficio}`, 20, 35);
+      doc.text(cleanPdfText(displayOficio), 20, 35);
       
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 100, 100);
-      doc.text(`Expediente: ${expediente}`, 277, 35, { align: 'right' });
+      doc.text(cleanPdfText(displayExp), 277, 35, { align: 'right' });
 
       // Intro Text
       doc.setFontSize(9);
       doc.setTextColor(80, 80, 80);
       doc.text('Relación de ingresantes que solicitan reserva de vacante por cursar estudios secundarios:', 20, 45);
 
-      // Table
-      const tableData = students.map((s, index) => [
-          index + 1,
-          s.code,
-          s.name,
-          `${s.carrera}\n(${s.admissionModality})`,
-          s.gradeLevel,
-          s.startingSemester,
-          s.observation || '-'
-      ]);
+      // Table: Aplicar saneamiento tipográfico a cada celda
+      const tableData = students.map((s, index) => {
+          const cleanCode = cleanPdfText(s.code);
+          const cleanName = cleanStudentName(s.name);
+          const cleanCarreraMod = cleanPdfText(`${s.carrera}\n(${s.admissionModality})`);
+          const cleanGrade = cleanPdfText(s.gradeLevel);
+          const cleanSem = cleanPdfText(s.startingSemester);
+          const cleanObs = cleanPdfText(s.observation || '-');
+
+          if (includeObs) {
+              return [
+                  index + 1,
+                  cleanCode,
+                  cleanName,
+                  cleanCarreraMod,
+                  cleanGrade,
+                  cleanSem,
+                  cleanObs
+              ];
+          } else {
+              return [
+                  index + 1,
+                  cleanCode,
+                  cleanName,
+                  cleanCarreraMod,
+                  cleanGrade,
+                  cleanSem
+              ];
+          }
+      });
+
+      const head = includeObs
+          ? [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA / MODALIDAD', 'AÑO SEC.', 'SEMESTRE', 'OBSERVACIONES']]
+          : [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA / MODALIDAD', 'AÑO SEC.', 'SEMESTRE']];
+
+      const columnStyles = includeObs ? {
+          0: { cellWidth: 15, halign: 'center' as const },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 50, fontStyle: 'bold' as const },
+          3: { cellWidth: 65 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 20, fontStyle: 'bold' as const, textColor: unsaacRed },
+          6: { cellWidth: 'auto' as const }
+      } : {
+          0: { cellWidth: 15, halign: 'center' as const },
+          1: { cellWidth: 30 },
+          2: { cellWidth: 75, fontStyle: 'bold' as const },
+          3: { cellWidth: 90 },
+          4: { cellWidth: 22 },
+          5: { cellWidth: 25, fontStyle: 'bold' as const, textColor: unsaacRed }
+      };
 
       autoTable(doc, {
           startY: 50,
-          head: [['Nº', 'CÓDIGO', 'NOMBRE COMPLETO', 'ESCUELA / MODALIDAD', 'AÑO SEC.', 'SEMESTRE', 'OBSERVACIONES']],
+          head: head,
           body: tableData,
           theme: 'grid',
           headStyles: { 
@@ -493,15 +676,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
               lineColor: [226, 232, 240],
               lineWidth: 0.1
           },
-          columnStyles: {
-              0: { cellWidth: 15, halign: 'center' },
-              1: { cellWidth: 25 },
-              2: { cellWidth: 50, fontStyle: 'bold' },
-              3: { cellWidth: 65 },
-              4: { cellWidth: 20 },
-              5: { cellWidth: 20, fontStyle: 'bold', textColor: unsaacRed },
-              6: { cellWidth: 'auto' }
-          },
+          columnStyles: columnStyles,
           didDrawPage: (data) => {
               doc.setFontSize(8);
               doc.setTextColor(150, 150, 150);
@@ -509,10 +684,10 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
           }
       });
 
-      doc.save(`Reporte_Reserva_${oficio.replace(/\//g, '-')}.pdf`);
+      doc.save(`Reporte_Reserva_${displayOficio.replace(/\s+/g, '_').replace(/[\/º°]/g, '-')}.pdf`);
   };
 
-  const downloadBatchPdf = async (batch: VacancyReservationBatch) => {
+  const downloadBatchPdf = async (batch: VacancyReservationBatch, includeObs: boolean = true) => {
       setLoading(true);
       try {
           const { data, error } = await supabase
@@ -532,7 +707,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
               }
               return {
                   code: d.student_code,
-                  name: d.student_name,
+                  name: cleanStudentName(d.student_name),
                   carrera: d.carrera,
                   admissionModality: d.admission_modality || '',
                   gradeLevel: d.grade_level || 'QUINTO',
@@ -544,7 +719,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
               };
           });
           
-          generatePDFReport(batch.report_code, batch.expediente_number, students);
+          generatePDFReport(batch.report_code, batch.expediente_number, students, includeObs);
           if (notify) notify("PDF generado correctamente", "success");
       } catch (err: any) {
           if (notify) notify("Error al generar PDF: " + err.message, "error");
@@ -931,11 +1106,91 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
                           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nº Expediente</span>
                           <input value={expedienteNum} onChange={e => setExpedienteNum(e.target.value)} className="h-14 px-5 rounded-2xl border-2 border-slate-100 bg-slate-50 font-bold outline-none focus:border-primary transition-all" placeholder="Ej: 224850" />
                       </label>
+
+                      {/* Opción para activar / desactivar la columna de Observaciones en el PDF generado */}
+                      <div 
+                          onClick={() => setPdfIncludeObservations(!pdfIncludeObservations)}
+                          className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/80 border-2 border-slate-100 rounded-2xl cursor-pointer transition-all select-none group"
+                      >
+                          <div className="flex items-center gap-3">
+                              <div className={`size-9 rounded-xl flex items-center justify-center transition-colors ${pdfIncludeObservations ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-400'}`}>
+                                  <span className="material-symbols-outlined text-lg">notes</span>
+                              </div>
+                              <div className="flex flex-col">
+                                  <span className="text-xs font-black text-slate-800">Columna "Observaciones"</span>
+                                  <span className="text-[10px] text-slate-400 font-bold">
+                                      {pdfIncludeObservations ? 'Se incluirá en el PDF' : 'No se incluirá en el PDF'}
+                                  </span>
+                              </div>
+                          </div>
+                          <div className={`w-11 h-6 rounded-full transition-colors relative flex items-center px-0.5 ${pdfIncludeObservations ? 'bg-primary' : 'bg-slate-300'}`}>
+                              <div className={`size-5 rounded-full bg-white shadow-sm transition-transform ${pdfIncludeObservations ? 'translate-x-5' : 'translate-x-0'}`} />
+                          </div>
+                      </div>
                   </div>
-                  <div className="mt-10 flex gap-4">
+                  <div className="mt-8 flex gap-4">
                       <button onClick={() => setIsSaveBatchModalOpen(false)} className="flex-1 font-black text-slate-400 uppercase text-xs tracking-widest">Cancelar</button>
                       <button onClick={handleSaveBatch} disabled={loading || !reportCode || !expedienteNum} className="flex-[2] py-4 bg-primary text-white rounded-2xl font-black uppercase text-xs shadow-xl shadow-primary/30">
                           {loading ? 'PROCESANDO...' : `GUARDAR (${selectedForBatch.size})`}
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* Modal Opciones de Reporte PDF para Bloque */}
+      {pdfBatchToDownload && (
+          <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in-95">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 border border-slate-100">
+                  <div className="flex items-center gap-4 mb-6">
+                      <div className="size-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100">
+                          <span className="material-symbols-outlined text-2xl">picture_as_pdf</span>
+                      </div>
+                      <div>
+                          <h3 className="font-black text-slate-900 text-lg uppercase tracking-tight">Reporte PDF de Bloque</h3>
+                          <p className="text-xs text-slate-500 font-medium">Oficio: <strong className="text-slate-800">{pdfBatchToDownload.report_code}</strong></p>
+                      </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 mb-6 flex flex-col gap-2">
+                      <div 
+                          onClick={() => setPdfIncludeObservations(!pdfIncludeObservations)}
+                          className="flex items-center justify-between cursor-pointer select-none"
+                      >
+                          <div className="flex items-center gap-3">
+                              <div className={`size-9 rounded-xl flex items-center justify-center transition-colors ${pdfIncludeObservations ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-400'}`}>
+                                  <span className="material-symbols-outlined text-lg">notes</span>
+                              </div>
+                              <div className="flex flex-col">
+                                  <span className="text-xs font-black text-slate-800">Columna "Observaciones"</span>
+                                  <span className="text-[10px] text-slate-500 font-medium">
+                                      {pdfIncludeObservations ? 'Visible en la tabla del PDF' : 'Ocultar columna en la tabla'}
+                                  </span>
+                              </div>
+                          </div>
+                          <div className={`w-11 h-6 rounded-full transition-colors relative flex items-center px-0.5 ${pdfIncludeObservations ? 'bg-primary' : 'bg-slate-300'}`}>
+                              <div className={`size-5 rounded-full bg-white shadow-sm transition-transform ${pdfIncludeObservations ? 'translate-x-5' : 'translate-x-0'}`} />
+                          </div>
+                      </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                      <button 
+                          onClick={() => setPdfBatchToDownload(null)} 
+                          className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs uppercase tracking-wider transition-all"
+                      >
+                          Cancelar
+                      </button>
+                      <button 
+                          onClick={() => {
+                              const b = pdfBatchToDownload;
+                              setPdfBatchToDownload(null);
+                              downloadBatchPdf(b, pdfIncludeObservations);
+                          }} 
+                          className="flex-[1.5] py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all active:scale-95"
+                      >
+                          <span className="material-symbols-outlined text-sm">download</span>
+                          DESCARGAR PDF
                       </button>
                   </div>
               </div>
@@ -1187,6 +1442,14 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
                       
                       {/* Action buttons in header */}
                       <div className="flex items-center gap-3">
+                          <button 
+                              onClick={() => setPdfBatchToDownload(selectedPreviewBatch)}
+                              className="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-black uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 active:scale-95"
+                              title="Descargar Reporte PDF del Bloque"
+                          >
+                              <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span>
+                              PDF Reporte
+                          </button>
                           {!isEditingBatchStudents ? (
                               <button 
                                   onClick={() => setIsEditingBatchStudents(true)}
@@ -1453,7 +1716,30 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
                             <>
                               <button onClick={() => csvInputRef.current?.click()} className="px-6 h-12 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">SUBIR CSV</button>
                               {tempList.length > 0 && (
-                                  <button onClick={generatePreviewPDFReport} className="px-6 h-12 bg-white border-2 border-slate-100 text-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">REPORTE PREVIO (PDF)</button>
+                                  <div className="flex items-center gap-2 bg-slate-50 border-2 border-slate-100 rounded-2xl px-3 py-1">
+                                      <button 
+                                          onClick={() => generatePreviewPDFReport(pdfIncludeObservations)} 
+                                          className="px-2 h-10 text-slate-700 text-[10px] font-black uppercase tracking-widest hover:text-indigo-600 transition-all flex items-center gap-1.5"
+                                          title="Generar PDF del listado actual"
+                                      >
+                                          <span className="material-symbols-outlined text-base text-indigo-500">picture_as_pdf</span>
+                                          REPORTE PREVIO (PDF)
+                                      </button>
+                                      <div className="h-6 w-px bg-slate-200" />
+                                      <button 
+                                          type="button"
+                                          onClick={() => setPdfIncludeObservations(!pdfIncludeObservations)}
+                                          className={`px-2.5 py-1 rounded-xl text-[9px] font-black uppercase transition-all flex items-center gap-1 ${
+                                              pdfIncludeObservations 
+                                                  ? 'bg-indigo-100 text-indigo-700' 
+                                                  : 'bg-slate-200 text-slate-500'
+                                          }`}
+                                          title="Activar o desactivar columna de observaciones en el reporte PDF"
+                                      >
+                                          <span className="material-symbols-outlined text-[13px]">{pdfIncludeObservations ? 'check_box' : 'check_box_outline_blank'}</span>
+                                          OBS: {pdfIncludeObservations ? 'SÍ' : 'NO'}
+                                      </button>
+                                  </div>
                               )}
                               <button onClick={() => setIsSaveBatchModalOpen(true)} disabled={selectedForBatch.size === 0} className="px-8 h-12 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl disabled:opacity-50 transition-all active:scale-95">GENERAR BLOQUE ({selectedForBatch.size})</button>
                             </>
@@ -1655,7 +1941,7 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
                                                           <button onClick={(e) => { e.stopPropagation(); handleOpenPreview(b); setActiveMenuId(null); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors">
                                                               <span className="material-symbols-outlined text-[18px] text-blue-500">group</span> Ver Estudiantes
                                                           </button>
-                                                          <button onClick={(e) => { e.stopPropagation(); downloadBatchPdf(b); setActiveMenuId(null); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors">
+                                                          <button onClick={(e) => { e.stopPropagation(); setPdfBatchToDownload(b); setActiveMenuId(null); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors">
                                                               <span className="material-symbols-outlined text-[18px] text-indigo-500">picture_as_pdf</span> PDF Reporte
                                                           </button>
                                                           <button onClick={(e) => { e.stopPropagation(); downloadBatchExcel(b); setActiveMenuId(null); }} className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors">

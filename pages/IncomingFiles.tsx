@@ -19,19 +19,26 @@ import { DEFAULT_DESTINATIONS } from './OutgoingFiles';
 
 
 
+// Trámites recurrentes oficiales para selección rápida al registrar un nuevo expediente
 const COMMON_SUBJECTS = [
   "CONSTANCIA DE INGRESO",
-  "CONSTANCIA",
   "INFORME DE RECTIFICACIÓN DE DATOS",
-  "INFORME DE RECTIFICACIÓN",
-  "RECTIFICACIÓN",
   "INFORME DE RENUNCIA",
-  "RENUNCIA",
   "DEVOLUCIÓN",
   "TRANSFERENCIA",
   "RECTIFICACIÓN DE DATOS JUDICIAL",
-  "INFORME DE INCLUSIÓN",
-  "INCLUSIÓN"
+  "INFORME DE INCLUSIÓN"
+];
+
+// Palabras clave para identificar automáticamente si un expediente entrante corresponde a un flujo recurrente asistido
+const RECURRENT_KEYWORDS = [
+  "CONSTANCIA",
+  "RECTIFIC",
+  "RENUNCIA",
+  "DEVOLUCI",
+  "TRANSFEREN",
+  "INCLUSI",
+  "JUDICIAL"
 ];
 
 const STATUS_OPTIONS = ['Pendiente', 'En Progreso', 'Atendido', 'Archivado', 'Derivado', 'Devuelto'];
@@ -865,9 +872,11 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       setSelectedPayment(null);
       setTargetExam('');
 
-      // Determinar flujo
-      const isRecurrent = COMMON_SUBJECTS.some(s => file.subject.toUpperCase().includes(s));
-      const isPayment = file.subject.includes('DEVOLUCIÓN') || file.subject.includes('TRANSFERENCIA');
+      // Determinar flujo recurrente (por asunto oficial o palabras clave)
+      const subjectUpper = file.subject.toUpperCase();
+      const isRecurrent = COMMON_SUBJECTS.some(s => subjectUpper.includes(s)) ||
+                          RECURRENT_KEYWORDS.some(k => subjectUpper.includes(k));
+      const isPayment = subjectUpper.includes('DEVOLUCIÓN') || subjectUpper.includes('TRANSFERENCIA') || subjectUpper.includes('DEVOLUCION');
 
       if (isRecurrent) {
           if (!isPayment) {
@@ -877,17 +886,25 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 const loadedTemplates = data || [];
                 setTemplates(loadedTemplates);
                 
-                // Auto-selección inteligente por coincidencia
-                const match = loadedTemplates.find(t => 
-                    file.subject.toUpperCase().includes(t.name.toUpperCase()) || 
-                    t.name.toUpperCase().includes(file.subject.toUpperCase())
+                // Auto-selección inteligente por coincidencia o similitud
+                let match = loadedTemplates.find(t => 
+                    subjectUpper.includes(t.name.toUpperCase()) || 
+                    t.name.toUpperCase().includes(subjectUpper)
                 );
-                if (match) {
-                    setSelectedTemplate(match);
-                } else if (file.subject.toUpperCase().includes('RENUNCIA')) {
-                    const renunciaMatch = loadedTemplates.find(t => t.name.toUpperCase().includes('RENUNCIA'));
-                    if (renunciaMatch) setSelectedTemplate(renunciaMatch);
+                if (!match) {
+                    if (subjectUpper.includes('RENUNCIA')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('RENUNCIA'));
+                    } else if (subjectUpper.includes('RECTIF') && subjectUpper.includes('JUDICIAL')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('JUDICIAL'));
+                    } else if (subjectUpper.includes('RECTIF')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('RECTIF'));
+                    } else if (subjectUpper.includes('INCLUSI')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('INCLUSI'));
+                    } else if (subjectUpper.includes('CONSTANCIA')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('CONSTANCIA'));
+                    }
                 }
+                if (match) setSelectedTemplate(match);
                 
               } catch (err) {
                 console.error("Error al cargar plantillas", err);
@@ -2165,7 +2182,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asunto</span>
                           <div className="flex flex-wrap gap-2 mb-2">
                               {COMMON_SUBJECTS.map(s => (
-                                  <button key={s} onClick={() => setNewSubject(s)} className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase border transition-all ${newSubject === s ? 'bg-primary text-white border-primary shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-white'}`}>
+                                  <button key={s} type="button" onClick={() => setNewSubject(s)} className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase border transition-all ${newSubject === s ? 'bg-primary text-white border-primary shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-white'}`}>
                                       {s}
                                   </button>
                               ))}
@@ -2428,16 +2445,23 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                         <p className="text-xs text-slate-500">Elija la versión de plantilla con la que desea emitir el informe o constancia para este expediente.</p>
                                     </div>
 
-                                    {/* Tarjetas de Plantillas Disponibles para este tipo de trámite */}
+                                    {/* Tarjetas de Plantillas Disponibles por similitud para este tipo de trámite */}
                                     {(() => {
                                         const subjectUpper = fileToAttend?.subject?.toUpperCase() || '';
-                                        const isRenuncia = subjectUpper.includes('RENUNCIA') || selectedTemplate?.name.toUpperCase().includes('RENUNCIA');
-                                        const isRect = subjectUpper.includes('RECTIF') || selectedTemplate?.name.toUpperCase().includes('RECTIF');
+                                        const currentTName = selectedTemplate?.name.toUpperCase() || '';
+                                        const isRenuncia = subjectUpper.includes('RENUNCIA') || currentTName.includes('RENUNCIA');
+                                        const isRect = subjectUpper.includes('RECTIF') || currentTName.includes('RECTIF');
+                                        const isInclusion = subjectUpper.includes('INCLUSI') || currentTName.includes('INCLUSI');
+                                        const isConstancia = subjectUpper.includes('CONSTANCIA') || currentTName.includes('CONSTANCIA');
+                                        const isJudicial = subjectUpper.includes('JUDICIAL') || currentTName.includes('JUDICIAL');
                                         
                                         const relatedTemplates = templates.filter(t => {
                                             const tUpper = t.name.toUpperCase();
                                             if (isRenuncia && tUpper.includes('RENUNCIA')) return true;
                                             if (isRect && tUpper.includes('RECTIF')) return true;
+                                            if (isInclusion && tUpper.includes('INCLUSI')) return true;
+                                            if (isConstancia && tUpper.includes('CONSTANCIA')) return true;
+                                            if (isJudicial && tUpper.includes('JUDICIAL')) return true;
                                             return false;
                                         });
 
