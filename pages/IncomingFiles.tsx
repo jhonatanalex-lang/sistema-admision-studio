@@ -4,8 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabaseClient';
-import { IncomingFile, Participant, Template, PaymentRegistry, User } from '../types';
+import { IncomingFile, Participant, Template, PaymentRegistry, Resignation, User } from '../types';
 import { UnifiedTimelineModal } from '../components/UnifiedTimelineModal';
+import { ConcludeResignationModal, ConcludeResignationResult } from '../components/ConcludeResignationModal';
 import { 
   getUserInitials, 
   generateVerificationCode, 
@@ -72,7 +73,22 @@ interface GroupedIncomingFile extends IncomingFile {
     isGenerated?: boolean;
     created_at?: string;
   };
+  pendingResignation?: Resignation;
 }
+
+const extractResolutionHint = (rawText?: string | null): string => {
+  if (!rawText) return '';
+  const text = rawText.trim().toUpperCase();
+  const fullMatch = text.match(/RESOLUCI[ÓO]N(?:\s+N[°º.]?)?\s*[0-9A-Z/-]+(?:-VRAC(?:-UNSAAC)?)?/i);
+  if (fullMatch?.[0]) {
+    return fullMatch[0].trim().toUpperCase();
+  }
+  const shortMatch = text.match(/\bR\.?\s*N[°º.]?\s*\d{1,5}\s*-\s*\d{4}[A-Z0-9-]*/i);
+  if (shortMatch?.[0]) {
+    return shortMatch[0].trim().toUpperCase();
+  }
+  return '';
+};
 
 export interface MatchingAdmission {
   id: string;
@@ -200,6 +216,24 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   const [matchedOutgoingFile, setMatchedOutgoingFile] = useState<any>(null);
   const [matchedAssignment, setMatchedAssignment] = useState<any>(null);
   const [updateOutgoingStatus, setUpdateOutgoingStatus] = useState(false);
+  const [matchedResignation, setMatchedResignation] = useState<Resignation | null>(null);
+  const [concludeResignationOnSave, setConcludeResignationOnSave] = useState(true);
+  const autoOpenedResignationExpRef = useRef<string>('');
+  const [concludeModalState, setConcludeModalState] = useState<{
+    isOpen: boolean;
+    resignation: Resignation | null;
+    mode: 'from-registration' | 'from-table';
+    tableFile?: GroupedIncomingFile | null;
+    initialResNumber?: string;
+    outgoingFileId?: string;
+  }>({
+    isOpen: false,
+    resignation: null,
+    mode: 'from-registration',
+    tableFile: null,
+    initialResNumber: '',
+    outgoingFileId: undefined
+  });
 
   useEffect(() => {
     fetchOperators();
@@ -235,55 +269,181 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   }, [currentFilter, searchQuery]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const checkOutgoing = async () => {
-      if (!newNumber.trim()) {
-        setMatchedOutgoingFile(null);
-        setMatchedAssignment(null);
+      const cleanNum = newNumber.trim();
+      if (!cleanNum || !isModalOpen) {
+        if (!cleanNum) {
+          setMatchedOutgoingFile(null);
+          setMatchedAssignment(null);
+          setMatchedResignation(null);
+          setConcludeResignationOnSave(false);
+          autoOpenedResignationExpRef.current = '';
+        }
         return;
       }
+
+      let foundOutgoing: any = null;
       try {
-        const { data: outgoingData } = await supabase
+        const { data: outgoingByRef } = await supabase
           .from('expedientes_salida')
           .select('*')
-          .eq('ref_number', newNumber.trim())
+          .eq('ref_number', cleanNum)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-        
-        if (outgoingData) {
-          setMatchedOutgoingFile(outgoingData);
+
+        foundOutgoing = outgoingByRef;
+
+        if (!foundOutgoing) {
+          const { data: outgoingByMeta } = await supabase
+            .from('expedientes_salida')
+            .select('*')
+            .ilike('destination', `%"expediente_numero":"${cleanNum}"%`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          foundOutgoing = outgoingByMeta;
+        }
+
+        if (cancelled) return;
+
+        if (foundOutgoing) {
+          setMatchedOutgoingFile(foundOutgoing);
           setUpdateOutgoingStatus(true);
         } else {
           setMatchedOutgoingFile(null);
         }
       } catch (err) {
-        setMatchedOutgoingFile(null);
+        if (!cancelled) setMatchedOutgoingFile(null);
+      }
+
+      // Detectar si corresponde a un trámite de renuncia (en tabla `renuncias` o informe de renuncia de salida)
+      try {
+        const outMeta = foundOutgoing ? parseOutgoingDestinationMeta(foundOutgoing.destination) : null;
+        const outCombinedText = `${foundOutgoing?.doc_type || ''} ${foundOutgoing?.subject || ''} ${outMeta?.tipo_documento || ''}`.toUpperCase();
+        const isOutgoingRenuncia = outCombinedText.includes('RENUNCIA');
+
+        let renunciaRows: Resignation[] = [];
+        const { data: byExpData } = await supabase
+          .from('renuncias')
+          .select('*')
+          .eq('expediente_number', cleanNum)
+          .order('created_at', { ascending: false });
+
+        if (byExpData && byExpData.length > 0) {
+          renunciaRows = byExpData as Resignation[];
+        } else if (isOutgoingRenuncia) {
+          const studentDni = (outMeta?.estudiante_dni || outMeta?.estudiante_codigo || '').trim();
+          const outDocNum = String(foundOutgoing?.doc_number || '').trim();
+
+          if (studentDni) {
+            const { data: byStudentData } = await supabase
+              .from('renuncias')
+              .select('*')
+              .eq('student_code', studentDni)
+              .order('created_at', { ascending: false });
+
+            if (byStudentData && byStudentData.length > 0) {
+              const targetSchool = String(outMeta?.carrera || '').trim().toUpperCase();
+              renunciaRows = (byStudentData as Resignation[]).filter(r => {
+                const rExp = String(r.expediente_number || '').trim();
+                const rInf = String(r.informe_number || '').trim().toUpperCase();
+                const rSchool = String(r.school || '').trim().toUpperCase();
+                if (rExp === cleanNum) return true;
+                if (outDocNum && rInf && rInf === outDocNum.toUpperCase()) return true;
+                if (!rExp && (!targetSchool || rSchool === targetSchool)) return true;
+                return false;
+              });
+            }
+          }
+        }
+
+        if (cancelled) return;
+
+        let resolvedResignation: Resignation | null = null;
+        if (renunciaRows.length > 0) {
+          const finalized = renunciaRows.find(r => r.status === 'Finalizado');
+          if (finalized) {
+            resolvedResignation = finalized;
+          } else {
+            const primary = renunciaRows[0];
+            const duplicateIds = renunciaRows.slice(1).map(r => r.id);
+            resolvedResignation = {
+              ...primary,
+              expediente_number: primary.expediente_number || cleanNum,
+              informe_number: primary.informe_number || foundOutgoing?.doc_number || '',
+              informe_pdf: primary.informe_pdf || foundOutgoing?.pdf_url || '',
+              duplicateIds
+            };
+          }
+        } else if (isOutgoingRenuncia && outMeta?.estudiante_nombre && (outMeta?.estudiante_dni || outMeta?.estudiante_codigo)) {
+          resolvedResignation = {
+            id: '',
+            student_name: (outMeta.estudiante_nombre || '').toUpperCase(),
+            student_code: (outMeta.estudiante_dni || outMeta.estudiante_codigo || '').trim(),
+            school: (outMeta.carrera || '').toUpperCase(),
+            semester: outMeta.semestre || '',
+            expediente_number: cleanNum,
+            informe_number: foundOutgoing?.doc_number || '',
+            informe_pdf: foundOutgoing?.pdf_url || '',
+            status: 'Pendiente Resolución',
+            created_at: foundOutgoing?.created_at || new Date().toISOString()
+          };
+        }
+
+        setMatchedResignation(resolvedResignation);
+
+        if (resolvedResignation && resolvedResignation.status === 'Pendiente Resolución') {
+          setConcludeResignationOnSave(true);
+          // Abrir automáticamente el modal "Concluir Renuncia" una vez por número de expediente detectado
+          if (cleanNum.length >= 4 && autoOpenedResignationExpRef.current !== cleanNum) {
+            autoOpenedResignationExpRef.current = cleanNum;
+            setConcludeModalState({
+              isOpen: true,
+              resignation: resolvedResignation,
+              mode: 'from-registration',
+              tableFile: null,
+              initialResNumber: extractResolutionHint(newSubject),
+              outgoingFileId: foundOutgoing?.id
+            });
+          }
+        } else {
+          setConcludeResignationOnSave(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMatchedResignation(null);
+          setConcludeResignationOnSave(false);
+        }
       }
 
       try {
         const { data: pendingData } = await supabase
           .from('expedientes')
           .select('*')
-          .eq('number', newNumber.trim())
+          .eq('number', cleanNum)
           .eq('assignment_status', 'pending')
           .not('assigned_to', 'is', null)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (pendingData) {
-          setMatchedAssignment(pendingData);
-        } else {
-          setMatchedAssignment(null);
+        if (!cancelled) {
+          setMatchedAssignment(pendingData || null);
         }
       } catch (err) {
-        setMatchedAssignment(null);
+        if (!cancelled) setMatchedAssignment(null);
       }
     };
-    
-    const timer = setTimeout(checkOutgoing, 500);
-    return () => clearTimeout(timer);
-  }, [newNumber]);
+
+    const timer = setTimeout(checkOutgoing, 650);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [newNumber, isModalOpen]);
 
   const fetchDestinationSuggestions = async () => {
       try {
@@ -366,20 +526,44 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       if (searchQuery.trim()) {
         query = query.or(`number.ilike.%${searchQuery.trim()}%,subject.ilike.%${searchQuery.trim()}%`);
       }
-      const [filesRes, salidasRes] = await Promise.all([
+      const [filesRes, salidasRes, renunciasRes] = await Promise.all([
         query.order('created_at', { ascending: false }).limit(1000),
-        supabase.from('expedientes_salida').select('id, doc_type, doc_number, ref_number, destination, pdf_url, created_at').order('created_at', { ascending: false }).limit(1000)
+        supabase.from('expedientes_salida').select('id, doc_type, doc_number, ref_number, destination, pdf_url, created_at').order('created_at', { ascending: false }).limit(1000),
+        supabase.from('renuncias').select('*').order('created_at', { ascending: false }).limit(1000)
       ]);
 
       const data = filesRes.data;
       const error = filesRes.error;
       const salidasData = salidasRes.data || [];
+      const renunciasData = (renunciasRes.data || []) as Resignation[];
 
       if (error) {
         console.error("Error fetching files:", error);
-        notify("Error al conectar con expedientes: " + error.message, "error");
+        notify?.("Error al conectar con expedientes: " + error.message, "error");
       }
       if (data) {
+        // Construir mapa de renuncias pendientes por número de expediente
+        const renunciasByExp = new Map<string, Resignation[]>();
+        renunciasData.forEach(r => {
+          const expKey = String(r.expediente_number || '').trim();
+          if (!expKey) return;
+          const bucket = renunciasByExp.get(expKey);
+          if (bucket) bucket.push(r);
+          else renunciasByExp.set(expKey, [r]);
+        });
+
+        const pendingRenunciasMap = new Map<string, Resignation>();
+        renunciasByExp.forEach((rows, expKey) => {
+          if (rows.some(r => r.status === 'Finalizado')) return;
+          const pendingRows = rows.filter(r => r.status === 'Pendiente Resolución');
+          if (pendingRows.length > 0) {
+            pendingRenunciasMap.set(expKey, {
+              ...pendingRows[0],
+              duplicateIds: pendingRows.slice(1).map(r => r.id)
+            });
+          }
+        });
+
         // Construir mapa de salidas por ref_number y por destination JSON (expediente_numero)
         const salidasMap = new Map<string, any>();
         salidasData.forEach((s: any) => {
@@ -424,7 +608,9 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         const groupedMap = new Map<string, GroupedIncomingFile>();
 
         data.forEach((item: any) => {
-            const outDoc = salidasMap.get(item.number);
+            const cleanItemNum = String(item.number || '').trim();
+            const outDoc = salidasMap.get(item.number) || salidasMap.get(cleanItemNum);
+            const pendingRenuncia = pendingRenunciasMap.get(cleanItemNum);
             const currentFile = {
                 id: item.id,
                 number: item.number,
@@ -438,7 +624,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 assignment_notes: item.assignment_notes,
                 assignment_type: item.assignment_type,
                 assignment_status: item.assignment_status,
-                outgoingDoc: outDoc
+                outgoingDoc: outDoc,
+                pendingResignation: pendingRenuncia
             };
 
             if (groupedMap.has(item.number)) {
@@ -463,6 +650,9 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 if (!existing.outgoingDoc && outDoc) {
                     existing.outgoingDoc = outDoc;
                 }
+                if (!existing.pendingResignation && pendingRenuncia) {
+                    existing.pendingResignation = pendingRenuncia;
+                }
             } else {
                 groupedMap.set(item.number, {
                     ...currentFile,
@@ -473,7 +663,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                         dateTime: currentFile.dateTime,
                         status: item.status
                     }],
-                    outgoingDoc: outDoc
+                    outgoingDoc: outDoc,
+                    pendingResignation: pendingRenuncia
                 });
             }
         });
@@ -700,11 +891,174 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
     setNewSubject('');
     setMatchedOutgoingFile(null);
     setMatchedAssignment(null);
+    setMatchedResignation(null);
+    setConcludeResignationOnSave(false);
     setUpdateOutgoingStatus(false);
+    autoOpenedResignationExpRef.current = '';
+  };
+
+  const openConcludeFromRegistration = () => {
+    if (!matchedResignation || matchedResignation.status !== 'Pendiente Resolución') return;
+    setConcludeModalState({
+      isOpen: true,
+      resignation: matchedResignation,
+      mode: 'from-registration',
+      tableFile: null,
+      initialResNumber: extractResolutionHint(newSubject),
+      outgoingFileId: matchedOutgoingFile?.id
+    });
+  };
+
+  const openConcludeFromTableRow = (file: GroupedIncomingFile) => {
+    if (!file.pendingResignation) return;
+    setConcludeModalState({
+      isOpen: true,
+      resignation: file.pendingResignation,
+      mode: 'from-table',
+      tableFile: file,
+      initialResNumber: extractResolutionHint(file.subject),
+      outgoingFileId: file.outgoingDoc?.id
+    });
+  };
+
+  const handleConcludedFromIncoming = async (result: ConcludeResignationResult) => {
+    if (concludeModalState.mode === 'from-registration') {
+      const cleanNum = newNumber.trim();
+      if (cleanNum) {
+        const { data: existingPending } = await supabase
+          .from('expedientes')
+          .select('id')
+          .eq('number', cleanNum)
+          .eq('assignment_status', 'pending');
+
+        if (existingPending && existingPending.length > 0) {
+          await supabase
+            .from('expedientes')
+            .update({ assignment_status: 'completed' })
+            .eq('number', cleanNum)
+            .eq('assignment_status', 'pending');
+
+          await supabase.from('tramite_seguimiento').insert([{
+            action_type: 'Asignación',
+            description: `Asignación de operador finalizada automáticamente al concluir la renuncia del expediente Nº ${cleanNum}.`,
+            user_name: user.name
+          }]);
+        }
+
+        const typedSubject = newSubject.trim().toUpperCase();
+        const autoSubject = `RESOLUCIÓN DE RENUNCIA: ${result.resolutionNumber} - ${result.resignation.student_name}`.toUpperCase();
+
+        const { error: insertErr } = await supabase.from('expedientes').insert([{
+          number: cleanNum,
+          subject: typedSubject || autoSubject,
+          status: 'Atendido',
+          created_by: user.id
+        }]);
+        if (insertErr) throw insertErr;
+
+        // Marcar también cualquier ingreso previo del mismo expediente como Atendido
+        await supabase
+          .from('expedientes')
+          .update({ status: 'Atendido' })
+          .eq('number', cleanNum)
+          .eq('status', 'Pendiente');
+
+        if (matchedOutgoingFile?.id) {
+          await supabase
+            .from('expedientes_salida')
+            .update({ status: 'Finalizado' })
+            .eq('id', matchedOutgoingFile.id);
+
+          await supabase.from('tramite_seguimiento').insert([{
+            expediente_id: matchedOutgoingFile.id,
+            action_type: 'Estado',
+            description: `Se recibió ${result.resolutionNumber} y se concluyó directamente el trámite de renuncia de ${result.resignation.student_name}.`,
+            user_name: user.name
+          }]);
+        } else {
+          await supabase
+            .from('expedientes_salida')
+            .update({ status: 'Finalizado' })
+            .eq('ref_number', cleanNum)
+            .neq('status', 'Finalizado');
+        }
+      }
+
+      setConcludeModalState({
+        isOpen: false,
+        resignation: null,
+        mode: 'from-registration',
+        tableFile: null,
+        initialResNumber: '',
+        outgoingFileId: undefined
+      });
+      handleCloseRegistrationModal();
+      fetchFiles();
+      if (notify) {
+        notify(
+          `Expediente Nº ${cleanNum} registrado y renuncia de ${result.resignation.student_name} concluida con ${result.resolutionNumber}.`,
+          'success'
+        );
+      }
+      return;
+    }
+
+    // Modo 'from-table': concluir renuncia desde un expediente entrante ya registrado en la tabla
+    const targetFile = concludeModalState.tableFile;
+    if (targetFile) {
+      await supabase
+        .from('expedientes')
+        .update({ status: 'Atendido', assignment_status: targetFile.assigned_to ? 'completed' : targetFile.assignment_status })
+        .eq('number', targetFile.number);
+
+      if (targetFile.outgoingDoc?.id) {
+        await supabase
+          .from('expedientes_salida')
+          .update({ status: 'Finalizado' })
+          .eq('id', targetFile.outgoingDoc.id);
+
+        await supabase.from('tramite_seguimiento').insert([{
+          expediente_id: targetFile.outgoingDoc.id,
+          action_type: 'Estado',
+          description: `Se registró ${result.resolutionNumber} y se concluyó el trámite de renuncia de ${result.resignation.student_name}.`,
+          user_name: user.name
+        }]);
+      } else {
+        await supabase
+          .from('expedientes_salida')
+          .update({ status: 'Finalizado' })
+          .eq('ref_number', targetFile.number)
+          .neq('status', 'Finalizado');
+      }
+    }
+
+    setConcludeModalState({
+      isOpen: false,
+      resignation: null,
+      mode: 'from-registration',
+      tableFile: null,
+      initialResNumber: '',
+      outgoingFileId: undefined
+    });
+    fetchFiles();
+    if (notify) {
+      notify(
+        `Renuncia de ${result.resignation.student_name} concluida con éxito (${result.resolutionNumber}).`,
+        'success'
+      );
+    }
   };
 
   const handleSaveIndividual = async () => {
-    if (!newNumber.trim() || !newSubject.trim()) return;
+    if (!newNumber.trim()) return;
+
+    // Si es un retorno de renuncia pendiente y está marcada la opción de concluir, abrir el modal de Concluir Renuncia
+    if (matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) {
+      openConcludeFromRegistration();
+      return;
+    }
+
+    if (!newSubject.trim()) return;
     setIsSubmitting(true);
     try {
       // Detect and auto-complete pending assignments for this number
@@ -750,12 +1104,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
 
       if (notify) notify("Expediente registrado correctamente");
 
-      setIsModalOpen(false);
-      setNewNumber('');
-      setNewSubject('');
-      setMatchedOutgoingFile(null);
-      setMatchedAssignment(null);
-      setUpdateOutgoingStatus(false);
+      handleCloseRegistrationModal();
       fetchFiles();
     } catch (err: any) {
       if (notify) notify(err.message, 'error');
@@ -868,6 +1217,15 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   };
 
   const openAttendWizard = async (file: IncomingFile) => {
+      const groupedFile = file as GroupedIncomingFile;
+      if (
+        groupedFile.pendingResignation &&
+        /RESOLUCI[ÓO]N|\bVRAC\b/i.test(file.subject || '')
+      ) {
+        openConcludeFromTableRow(groupedFile);
+        return;
+      }
+
       setFileToAttend(file);
       setAttendStep(1);
       
@@ -2253,20 +2611,48 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         />
       )}
 
+      {/* MODAL CONCLUIR RENUNCIA DIRECTA DESDE EXPEDIENTES ENTRANTES */}
+      <ConcludeResignationModal
+        isOpen={concludeModalState.isOpen}
+        resignation={concludeModalState.resignation}
+        user={user}
+        initialResolutionNumber={concludeModalState.initialResNumber}
+        outgoingFileId={concludeModalState.outgoingFileId}
+        contextLabel={
+          concludeModalState.mode === 'from-registration'
+            ? 'Retorno Detectado • Registro y Conclusión Directa'
+            : 'Conclusión Directa desde Mesa de Partes'
+        }
+        notify={notify}
+        onClose={() => {
+          setConcludeModalState(prev => ({ ...prev, isOpen: false }));
+          if (concludeModalState.mode === 'from-registration') {
+            setConcludeResignationOnSave(false);
+          }
+        }}
+        onConcluded={handleConcludedFromIncoming}
+      />
+
       {/* MODAL REGISTRO INDIVIDUAL */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in-95 duration-200">
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
-                  <div className="px-8 py-6 border-b flex justify-between items-center bg-slate-50">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]">
+                  <div className="px-8 py-6 border-b flex justify-between items-center bg-slate-50 shrink-0">
                       <h3 className="font-black text-slate-900 uppercase tracking-tight">REGISTRAR EXPEDIENTE</h3>
                       <button onClick={handleCloseRegistrationModal} className="text-slate-400 hover:text-slate-600 font-bold"><span className="material-symbols-outlined">close</span></button>
                   </div>
-                  <div className="p-8 flex flex-col gap-5">
+                  <div className="p-8 flex flex-col gap-5 overflow-y-auto">
                       <label className="flex flex-col gap-1.5">
                           <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nº Expediente</span>
                           <input 
                             value={newNumber} 
                             onChange={e => setNewNumber(e.target.value)} 
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) {
+                                e.preventDefault();
+                                openConcludeFromRegistration();
+                              }
+                            }}
                             className="h-14 px-5 rounded-2xl border-2 border-slate-100 bg-slate-50 text-slate-900 font-bold outline-none focus:border-primary focus:bg-white transition-all text-xl" 
                             placeholder="Ej: 224050" 
                             autoFocus 
@@ -2305,43 +2691,117 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                           </div>
                       )}
                       
-                      {matchedOutgoingFile && (
+                      {(matchedOutgoingFile || matchedResignation) && (
                           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 overflow-hidden">
                               <div className="flex items-center gap-2 text-blue-700">
                                   <span className="material-symbols-outlined text-xl shrink-0">info</span>
                                   <span className="text-xs font-black uppercase tracking-widest">Expediente de Retorno Detectado</span>
                               </div>
-                              <div className="bg-white p-3.5 rounded-xl border border-blue-100 text-sm flex flex-col gap-1.5 min-w-0 overflow-hidden">
-                                  <p className="font-black text-slate-800 break-words leading-snug">
-                                      {formatOutgoingDocTitle(matchedOutgoingFile.doc_type, matchedOutgoingFile.doc_number)}
-                                  </p>
-                                  <p className="text-xs font-medium text-slate-600 line-clamp-2 break-words">{matchedOutgoingFile.subject}</p>
-                                  <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 mt-1 pt-1.5 border-t border-slate-100 text-xs text-slate-500 min-w-0">
-                                      <span className="min-w-0 break-words">
-                                          Destino: <strong className="text-slate-700">{formatOutgoingDestination(matchedOutgoingFile.destination)}</strong>
+                              {matchedOutgoingFile && (
+                                <div className="bg-white p-3.5 rounded-xl border border-blue-100 text-sm flex flex-col gap-1.5 min-w-0 overflow-hidden">
+                                    <p className="font-black text-slate-800 break-words leading-snug">
+                                        {formatOutgoingDocTitle(matchedOutgoingFile.doc_type, matchedOutgoingFile.doc_number)}
+                                    </p>
+                                    <p className="text-xs font-medium text-slate-600 line-clamp-2 break-words">{matchedOutgoingFile.subject}</p>
+                                    <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 mt-1 pt-1.5 border-t border-slate-100 text-xs text-slate-500 min-w-0">
+                                        <span className="min-w-0 break-words">
+                                            Destino: <strong className="text-slate-700">{formatOutgoingDestination(matchedOutgoingFile.destination)}</strong>
+                                        </span>
+                                        <span className="shrink-0 font-semibold text-slate-400">
+                                            {new Date(matchedOutgoingFile.created_at).toLocaleDateString('es-PE')}
+                                        </span>
+                                    </div>
+                                </div>
+                              )}
+
+                              {matchedResignation?.status === 'Pendiente Resolución' && (
+                                <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 flex flex-col gap-2.5">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex flex-col gap-0.5 min-w-0">
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                                        <span className="material-symbols-outlined text-[15px] text-emerald-600">gavel</span>
+                                        Trámite de Renuncia Pendiente de Resolución
                                       </span>
-                                      <span className="shrink-0 font-semibold text-slate-400">
-                                          {new Date(matchedOutgoingFile.created_at).toLocaleDateString('es-PE')}
-                                      </span>
+                                      <p className="text-xs font-black text-slate-900 uppercase break-words">
+                                        {matchedResignation.student_name}
+                                      </p>
+                                      <p className="text-[10px] font-bold text-slate-500 uppercase">
+                                        {[matchedResignation.student_code, matchedResignation.school, matchedResignation.informe_number]
+                                          .filter(Boolean)
+                                          .join(' • ')}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={openConcludeFromRegistration}
+                                      className="shrink-0 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">task_alt</span>
+                                      Concluir Renuncia
+                                    </button>
                                   </div>
-                              </div>
-                              <label className="flex items-center gap-3 cursor-pointer mt-1 group">
-                                  <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${updateOutgoingStatus ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 group-hover:border-blue-400'}`}>
-                                      {updateOutgoingStatus && <span className="material-symbols-outlined text-[14px] font-bold">check</span>}
-                                  </div>
-                                  <input 
-                                      type="checkbox" 
-                                      className="hidden" 
-                                      checked={updateOutgoingStatus} 
-                                      onChange={(e) => setUpdateOutgoingStatus(e.target.checked)} 
-                                  />
-                                  <span className="text-xs font-bold text-slate-700 select-none">Marcar trámite de salida como FINALIZADO</span>
-                              </label>
+
+                                  <label className="flex items-center gap-2.5 cursor-pointer pt-2 border-t border-emerald-200/70 group">
+                                    <div
+                                      className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                        concludeResignationOnSave
+                                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                                          : 'bg-white border-slate-300 group-hover:border-emerald-400'
+                                      }`}
+                                    >
+                                      {concludeResignationOnSave && (
+                                        <span className="material-symbols-outlined text-[12px] font-bold">check</span>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="checkbox"
+                                      className="hidden"
+                                      checked={concludeResignationOnSave}
+                                      onChange={e => setConcludeResignationOnSave(e.target.checked)}
+                                    />
+                                    <span className="text-[11px] font-bold text-emerald-950 select-none">
+                                      Concluir renuncia con Resolución VRAC al registrar (desmarque si es solo observación)
+                                    </span>
+                                  </label>
+                                </div>
+                              )}
+
+                              {matchedResignation?.status === 'Finalizado' && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2.5 flex items-center gap-2 text-emerald-800 text-xs font-bold">
+                                  <span className="material-symbols-outlined text-base text-emerald-600">verified</span>
+                                  <span>
+                                    Renuncia ya concluida
+                                    {matchedResignation.resolution_number ? ` (${matchedResignation.resolution_number})` : ''}.
+                                  </span>
+                                </div>
+                              )}
+
+                              {matchedOutgoingFile && (
+                                <label className="flex items-center gap-3 cursor-pointer mt-0.5 group">
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${updateOutgoingStatus ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 group-hover:border-blue-400'}`}>
+                                        {updateOutgoingStatus && <span className="material-symbols-outlined text-[14px] font-bold">check</span>}
+                                    </div>
+                                    <input 
+                                        type="checkbox" 
+                                        className="hidden" 
+                                        checked={updateOutgoingStatus} 
+                                        onChange={(e) => setUpdateOutgoingStatus(e.target.checked)} 
+                                    />
+                                    <span className="text-xs font-bold text-slate-700 select-none">Marcar trámite de salida como FINALIZADO</span>
+                                </label>
+                              )}
                           </div>
                       )}
 
                       <label className="flex flex-col gap-2">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Asunto</span>
+                          <div className="flex items-center justify-between ml-1">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asunto</span>
+                              {matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave && (
+                                  <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full uppercase">
+                                      Autocompletable con la Resolución
+                                  </span>
+                              )}
+                          </div>
                           <div className="flex flex-wrap gap-2 mb-2">
                               {COMMON_SUBJECTS.map(s => (
                                   <button key={s} type="button" onClick={() => setNewSubject(s)} className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase border transition-all ${newSubject === s ? 'bg-primary text-white border-primary shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-white'}`}>
@@ -2353,14 +2813,34 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                             value={newSubject} 
                             onChange={e => setNewSubject(e.target.value.toUpperCase())} 
                             className="h-28 p-5 rounded-2xl border-2 border-slate-100 bg-slate-50 font-bold outline-none focus:border-primary resize-none text-xs leading-relaxed" 
-                            placeholder="Describa el asunto..." 
+                            placeholder={
+                              matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
+                                ? 'Opcional: se completará automáticamente con el Nº de Resolución VRAC al concluir la renuncia...'
+                                : 'Describa el asunto...'
+                            } 
                           />
                       </label>
                   </div>
-                  <div className="px-8 py-6 bg-slate-50 border-t flex justify-between items-center">
+                  <div className="px-8 py-6 bg-slate-50 border-t flex justify-between items-center shrink-0">
                       <button onClick={handleCloseRegistrationModal} className="px-6 py-2 text-xs font-black uppercase text-slate-400 hover:text-slate-600 transition-colors">CANCELAR</button>
-                      <button onClick={handleSaveIndividual} disabled={isSubmitting || !newNumber || !newSubject} className="px-10 py-4 bg-primary text-white rounded-2xl text-xs font-black uppercase shadow-xl shadow-primary/30 active:scale-95 transition-all">
-                          {isSubmitting ? 'GUARDANDO...' : 'REGISTRAR'}
+                      <button
+                          onClick={handleSaveIndividual}
+                          disabled={
+                            isSubmitting ||
+                            !newNumber.trim() ||
+                            (!(matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) && !newSubject.trim())
+                          }
+                          className={`px-8 py-4 text-white rounded-2xl text-xs font-black uppercase shadow-xl active:scale-95 transition-all disabled:opacity-50 ${
+                            matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
+                              ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
+                              : 'bg-primary shadow-primary/30'
+                          }`}
+                      >
+                          {isSubmitting
+                            ? 'GUARDANDO...'
+                            : matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
+                            ? 'CONCLUIR RENUNCIA'
+                            : 'REGISTRAR'}
                       </button>
                   </div>
               </div>
@@ -3393,12 +3873,24 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                 </button>
                                             )}
                                             {(user.role === 'Administrador' || user.role === 'Director' || (user.role === 'Operador' && !isRestrictedOperator)) && (
-                                              <button 
-                                                  onClick={() => openAttendWizard(file)} 
-                                                  className="px-5 py-2 bg-primary text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-primary/20 hover:scale-105 transition-all active:scale-95"
-                                              >
-                                                  ATENDER
-                                              </button>
+                                              <>
+                                                {file.pendingResignation && (
+                                                  <button
+                                                    onClick={() => openConcludeFromTableRow(file)}
+                                                    title={`Concluir renuncia pendiente de ${file.pendingResignation.student_name}`}
+                                                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-600/20 hover:scale-105 transition-all active:scale-95 flex items-center gap-1"
+                                                  >
+                                                    <span className="material-symbols-outlined text-[14px]">gavel</span>
+                                                    CONCLUIR
+                                                  </button>
+                                                )}
+                                                <button 
+                                                    onClick={() => openAttendWizard(file)} 
+                                                    className="px-5 py-2 bg-primary text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-primary/20 hover:scale-105 transition-all active:scale-95"
+                                                >
+                                                    ATENDER
+                                                </button>
+                                              </>
                                             )}
                                             <div className="relative">
                                                 <button 

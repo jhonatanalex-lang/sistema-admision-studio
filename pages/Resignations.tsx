@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Resignation, User } from '../types';
+import { ConcludeResignationModal } from '../components/ConcludeResignationModal';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
@@ -163,11 +164,11 @@ export const Resignations: React.FC<ResignationsProps> = ({ user, notify }) => {
   // Estado Modal Finalizar
   const [isFinalizeModalOpen, setIsFinalizeModalOpen] = useState(false);
   const [targetResignation, setTargetResignation] = useState<Resignation | null>(null);
-  const [resNumber, setResNumber] = useState('');
-  const [resDate, setResDate] = useState('');
-  const [resDriveUrl, setResDriveUrl] = useState('');
-  const [resFile, setResFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const canManageResignations =
+    user.role === 'Administrador' ||
+    (user.role === 'Operador' && Boolean(user.permissions?.includes('view_renuncias')));
 
   // Estado Modal Eliminar Registro
   const [itemToDelete, setItemToDelete] = useState<Resignation | null>(null);
@@ -327,65 +328,22 @@ export const Resignations: React.FC<ResignationsProps> = ({ user, notify }) => {
     }
   };
 
-  const handleFinalize = async () => {
-    if (!targetResignation || !resNumber || !resDate) return;
-    setIsSubmitting(true);
-    try {
-      let finalUrl = resDriveUrl.trim();
-
-      if (resFile) {
-        const sanitizedName = resFile.name.replace(/[^a-zA-Z0-9.]/g, '_');
-        const fileName = `${Date.now()}-${sanitizedName}`;
-        const { error: uploadError } = await supabase.storage
-          .from('documentos')
-          .upload(`resoluciones/${fileName}`, resFile, {
-            contentType: 'application/pdf',
-            upsert: true
-          });
-
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage
-          .from('documentos')
-          .getPublicUrl(`resoluciones/${fileName}`);
-
-        finalUrl = urlData.publicUrl;
-      }
-
-      const { error: updateError } = await supabase
-        .from('renuncias')
-        .update({
-          status: 'Finalizado',
-          resolution_number: resNumber.trim(),
-          resolution_date: resDate,
-          resolution_pdf: finalUrl,
-          informe_number: targetResignation.informe_number,
-          informe_pdf: targetResignation.informe_pdf
-        })
-        .eq('id', targetResignation.id);
-
-      if (updateError) throw updateError;
-
-      // Si tenía copias pendientes duplicadas del mismo expediente, eliminarlas al finalizar
-      if (targetResignation.duplicateIds && targetResignation.duplicateIds.length > 0) {
+  const handleResignationConcluded = async (resignation: Resignation) => {
+    if (resignation.expediente_number) {
+      try {
         await supabase
-          .from('renuncias')
-          .delete()
-          .in('id', targetResignation.duplicateIds);
+          .from('expedientes_salida')
+          .update({ status: 'Finalizado' })
+          .eq('ref_number', resignation.expediente_number.trim())
+          .neq('status', 'Finalizado');
+      } catch (e) {
+        console.warn('No se pudo sincronizar estado de salida:', e);
       }
-
-      showNotice(`Renuncia de ${targetResignation.student_name} finalizada con éxito.`, 'success');
-      setIsFinalizeModalOpen(false);
-      setTargetResignation(null);
-      setResFile(null);
-      setResDriveUrl('');
-      fetchResignations();
-    } catch (err: any) {
-      console.error(err);
-      showNotice(`Error al finalizar renuncia: ${err.message || 'Error desconocido'}`, 'error');
-    } finally {
-      setIsSubmitting(false);
     }
+    showNotice(`Renuncia de ${resignation.student_name} finalizada con éxito.`, 'success');
+    setIsFinalizeModalOpen(false);
+    setTargetResignation(null);
+    fetchResignations();
   };
 
   const handleImportCSV = () => {
@@ -551,126 +509,17 @@ export const Resignations: React.FC<ResignationsProps> = ({ user, notify }) => {
   return (
     <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-6 p-6 md:p-8 h-full overflow-hidden">
       {/* MODAL FINALIZAR (CONCLUIR TRÁMITE) */}
-      {isFinalizeModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in-95">
-            <h3 className="font-black text-slate-900 uppercase text-xl mb-2 text-center">Concluir Renuncia</h3>
-            <p className="text-xs text-slate-500 mb-6 text-center uppercase font-bold tracking-tight">
-              ALUMNO: {targetResignation?.student_name}
-            </p>
-
-            <div className="flex flex-col gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-black text-slate-500 uppercase">Nº Resolución VRAC</span>
-                <input
-                  value={resNumber}
-                  onChange={e => setResNumber(e.target.value)}
-                  className="h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-bold outline-none focus:border-indigo-300"
-                  placeholder="RESOLUCIÓN N° 001-2026-VRAC-UNSAAC"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-black text-slate-500 uppercase">Fecha Emisión</span>
-                <input
-                  type="date"
-                  value={resDate}
-                  onChange={e => setResDate(e.target.value)}
-                  className="h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-bold outline-none focus:border-indigo-300"
-                />
-              </label>
-
-              <div className="flex flex-col gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                  Documento de Resolución
-                </span>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Subir Archivo PDF</span>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      onChange={e => {
-                        if (e.target.files && e.target.files[0]) {
-                          setResFile(e.target.files[0]);
-                          setResDriveUrl('');
-                        }
-                      }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                      disabled={!!resDriveUrl}
-                    />
-                    <div
-                      className={`h-12 px-4 rounded-xl border-2 border-dashed flex items-center justify-between transition-all ${
-                        resDriveUrl
-                          ? 'bg-slate-100 border-slate-200 opacity-50'
-                          : resFile
-                          ? 'bg-indigo-50 border-indigo-200'
-                          : 'bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30'
-                      }`}
-                    >
-                      <span
-                        className={`text-xs font-bold truncate pr-4 ${
-                          resFile ? 'text-indigo-700' : 'text-slate-400'
-                        }`}
-                      >
-                        {resFile ? resFile.name : 'Seleccionar archivo PDF...'}
-                      </span>
-                      <span
-                        className={`material-symbols-outlined text-lg ${
-                          resFile ? 'text-indigo-500' : 'text-slate-300'
-                        }`}
-                      >
-                        {resFile ? 'check_circle' : 'upload_file'}
-                      </span>
-                    </div>
-                  </div>
-                </label>
-
-                <div className="flex items-center gap-3 my-1">
-                  <div className="h-px bg-slate-200 flex-1"></div>
-                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">O</span>
-                  <div className="h-px bg-slate-200 flex-1"></div>
-                </div>
-
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase">Enlace de Drive</span>
-                  <input
-                    value={resDriveUrl}
-                    onChange={e => {
-                      setResDriveUrl(e.target.value);
-                      if (e.target.value) setResFile(null);
-                    }}
-                    className="h-12 px-4 rounded-xl border-2 border-slate-100 bg-white text-xs font-mono outline-none focus:border-indigo-300 transition-all disabled:opacity-50 disabled:bg-slate-100"
-                    placeholder="https://drive.google.com/..."
-                    disabled={!!resFile}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-8">
-              <button
-                onClick={() => {
-                  setIsFinalizeModalOpen(false);
-                  setTargetResignation(null);
-                  setResFile(null);
-                  setResDriveUrl('');
-                }}
-                className="flex-1 font-black text-slate-400 uppercase text-xs"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleFinalize}
-                disabled={isSubmitting || !resNumber || !resDate || (!resFile && !resDriveUrl)}
-                className="flex-[2] py-4 bg-green-600 text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all disabled:opacity-50"
-              >
-                {isSubmitting ? 'PROCESANDO...' : 'FINALIZAR TRÁMITE'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConcludeResignationModal
+        isOpen={isFinalizeModalOpen}
+        resignation={targetResignation}
+        user={user}
+        notify={notify}
+        onClose={() => {
+          setIsFinalizeModalOpen(false);
+          setTargetResignation(null);
+        }}
+        onConcluded={({ resignation }) => handleResignationConcluded(resignation)}
+      />
 
       {/* MODAL CONFIRMAR ELIMINACIÓN */}
       {itemToDelete && (
@@ -1009,26 +858,26 @@ export const Resignations: React.FC<ResignationsProps> = ({ user, notify }) => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right pr-10">
-                      {item.status !== 'Finalizado' && user.role === 'Administrador' && (
+                      {item.status !== 'Finalizado' && canManageResignations && (
                         <div className="inline-flex items-center gap-2 justify-end">
                           <button
                             onClick={() => {
                               setTargetResignation(item);
-                              setResNumber('');
-                              setResDate('');
                               setIsFinalizeModalOpen(true);
                             }}
                             className="px-4 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-black uppercase hover:scale-105 transition-transform"
                           >
                             Finalizar
                           </button>
-                          <button
-                            onClick={() => setItemToDelete(item)}
-                            title="Eliminar trámite"
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            <span className="material-symbols-outlined text-base leading-none">delete</span>
-                          </button>
+                          {user.role === 'Administrador' && (
+                            <button
+                              onClick={() => setItemToDelete(item)}
+                              title="Eliminar trámite"
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <span className="material-symbols-outlined text-base leading-none">delete</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </td>
