@@ -4,9 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { supabase } from '../lib/supabaseClient';
-import { IncomingFile, Participant, Template, PaymentRegistry, Resignation, User } from '../types';
+import { IncomingFile, Participant, Template, PaymentRegistry, Resignation, VacancyReservationBatch, User } from '../types';
 import { UnifiedTimelineModal } from '../components/UnifiedTimelineModal';
 import { ConcludeResignationModal, ConcludeResignationResult } from '../components/ConcludeResignationModal';
+import { ConcludeReservationModal, ConcludeReservationResult } from '../components/ConcludeReservationModal';
 import { 
   getUserInitials, 
   generateVerificationCode, 
@@ -74,7 +75,24 @@ interface GroupedIncomingFile extends IncomingFile {
     created_at?: string;
   };
   pendingResignation?: Resignation;
+  pendingReservationBatch?: VacancyReservationBatch;
 }
+
+const normalizeExpNumber = (raw?: string | null): string => {
+  if (!raw) return '';
+  return String(raw)
+    .trim()
+    .toUpperCase()
+    .replace(/^(EXP(EDIENTE)?\.?\s*(N[°ºª.]?)?\s*:?\s*)/i, '')
+    .trim();
+};
+
+const extractCoreDocSeqYear = (raw?: string | null): string => {
+  if (!raw) return '';
+  const m = String(raw).toUpperCase().match(/(\d{1,5})\s*-\s*(20\d{2})/);
+  if (!m) return '';
+  return `${parseInt(m[1], 10)}-${m[2]}`;
+};
 
 const extractResolutionHint = (rawText?: string | null): string => {
   if (!rawText) return '';
@@ -235,6 +253,28 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
     outgoingFileId: undefined
   });
 
+  const [matchedReservationBatch, setMatchedReservationBatch] = useState<VacancyReservationBatch | null>(null);
+  const [matchedReservationCount, setMatchedReservationCount] = useState<number | null>(null);
+  const [concludeReservationOnSave, setConcludeReservationOnSave] = useState(true);
+  const autoOpenedReservationExpRef = useRef<string>('');
+  const [concludeReservationModalState, setConcludeReservationModalState] = useState<{
+    isOpen: boolean;
+    batch: VacancyReservationBatch | null;
+    studentCount: number | null;
+    mode: 'from-registration' | 'from-table';
+    tableFile?: GroupedIncomingFile | null;
+    initialResNumber?: string;
+    outgoingFileId?: string;
+  }>({
+    isOpen: false,
+    batch: null,
+    studentCount: null,
+    mode: 'from-registration',
+    tableFile: null,
+    initialResNumber: '',
+    outgoingFileId: undefined
+  });
+
   useEffect(() => {
     fetchOperators();
   }, []);
@@ -280,6 +320,10 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           setMatchedResignation(null);
           setConcludeResignationOnSave(false);
           autoOpenedResignationExpRef.current = '';
+          setMatchedReservationBatch(null);
+          setMatchedReservationCount(null);
+          setConcludeReservationOnSave(false);
+          autoOpenedReservationExpRef.current = '';
         }
         return;
       }
@@ -419,6 +463,89 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         }
       }
 
+      // Detectar si corresponde a un bloque de Reserva de Vacante en `reserva_vacantes_bloques`
+      try {
+        const normalizedCleanNum = normalizeExpNumber(cleanNum);
+        const outCombinedText = `${foundOutgoing?.doc_type || ''} ${foundOutgoing?.subject || ''}`.toUpperCase();
+        const isOutgoingReserva = outCombinedText.includes('RESERVA');
+        const outCoreSeqYear = extractCoreDocSeqYear(foundOutgoing?.doc_number);
+
+        let candidateBatches: VacancyReservationBatch[] = [];
+        const { data: byBatchExp } = await supabase
+          .from('reserva_vacantes_bloques')
+          .select('*')
+          .ilike('expediente_number', `%${cleanNum}%`)
+          .order('created_at', { ascending: false });
+
+        if (byBatchExp && byBatchExp.length > 0) {
+          candidateBatches = (byBatchExp as VacancyReservationBatch[]).filter(
+            b => normalizeExpNumber(b.expediente_number) === normalizedCleanNum
+          );
+        }
+
+        if (candidateBatches.length === 0 && isOutgoingReserva && outCoreSeqYear) {
+          const { data: activeBatches } = await supabase
+            .from('reserva_vacantes_bloques')
+            .select('*')
+            .neq('status', 'Finalizado')
+            .order('created_at', { ascending: false });
+
+          if (activeBatches && activeBatches.length > 0) {
+            candidateBatches = (activeBatches as VacancyReservationBatch[]).filter(
+              b => extractCoreDocSeqYear(b.report_code) === outCoreSeqYear
+            );
+          }
+        }
+
+        if (cancelled) return;
+
+        let resolvedBatch: VacancyReservationBatch | null = null;
+        if (candidateBatches.length > 0) {
+          const inProgressBatch = candidateBatches.find(b => b.status !== 'Finalizado');
+          resolvedBatch = inProgressBatch || candidateBatches[0];
+        }
+
+        let batchCount: number | null = null;
+        if (resolvedBatch) {
+          const { count } = await supabase
+            .from('reserva_vacantes_detalles')
+            .select('id', { count: 'exact', head: true })
+            .eq('batch_id', resolvedBatch.id);
+          if (!cancelled) {
+            batchCount = typeof count === 'number' ? count : null;
+          }
+        }
+
+        if (cancelled) return;
+
+        setMatchedReservationBatch(resolvedBatch);
+        setMatchedReservationCount(batchCount);
+
+        if (resolvedBatch && resolvedBatch.status !== 'Finalizado') {
+          setConcludeReservationOnSave(true);
+          if (cleanNum.length >= 4 && autoOpenedReservationExpRef.current !== cleanNum) {
+            autoOpenedReservationExpRef.current = cleanNum;
+            setConcludeReservationModalState({
+              isOpen: true,
+              batch: resolvedBatch,
+              studentCount: batchCount,
+              mode: 'from-registration',
+              tableFile: null,
+              initialResNumber: extractResolutionHint(newSubject),
+              outgoingFileId: foundOutgoing?.id
+            });
+          }
+        } else {
+          setConcludeReservationOnSave(false);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setMatchedReservationBatch(null);
+          setMatchedReservationCount(null);
+          setConcludeReservationOnSave(false);
+        }
+      }
+
       try {
         const { data: pendingData } = await supabase
           .from('expedientes')
@@ -526,16 +653,18 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       if (searchQuery.trim()) {
         query = query.or(`number.ilike.%${searchQuery.trim()}%,subject.ilike.%${searchQuery.trim()}%`);
       }
-      const [filesRes, salidasRes, renunciasRes] = await Promise.all([
+      const [filesRes, salidasRes, renunciasRes, reservasRes] = await Promise.all([
         query.order('created_at', { ascending: false }).limit(1000),
         supabase.from('expedientes_salida').select('id, doc_type, doc_number, ref_number, destination, pdf_url, created_at').order('created_at', { ascending: false }).limit(1000),
-        supabase.from('renuncias').select('*').order('created_at', { ascending: false }).limit(1000)
+        supabase.from('renuncias').select('*').order('created_at', { ascending: false }).limit(1000),
+        supabase.from('reserva_vacantes_bloques').select('*').order('created_at', { ascending: false }).limit(500)
       ]);
 
       const data = filesRes.data;
       const error = filesRes.error;
       const salidasData = salidasRes.data || [];
       const renunciasData = (renunciasRes.data || []) as Resignation[];
+      const reservasData = (reservasRes.data || []) as VacancyReservationBatch[];
 
       if (error) {
         console.error("Error fetching files:", error);
@@ -561,6 +690,20 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               ...pendingRows[0],
               duplicateIds: pendingRows.slice(1).map(r => r.id)
             });
+          }
+        });
+
+        // Construir mapa de bloques de Reserva de Vacante en trámite por número de expediente
+        const pendingReservationsMap = new Map<string, VacancyReservationBatch>();
+        reservasData.forEach(b => {
+          if (b.status === 'Finalizado') return;
+          const rawExp = String(b.expediente_number || '').trim();
+          const normExp = normalizeExpNumber(rawExp);
+          if (rawExp && !pendingReservationsMap.has(rawExp)) {
+            pendingReservationsMap.set(rawExp, b);
+          }
+          if (normExp && !pendingReservationsMap.has(normExp)) {
+            pendingReservationsMap.set(normExp, b);
           }
         });
 
@@ -611,6 +754,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
             const cleanItemNum = String(item.number || '').trim();
             const outDoc = salidasMap.get(item.number) || salidasMap.get(cleanItemNum);
             const pendingRenuncia = pendingRenunciasMap.get(cleanItemNum);
+            const pendingReserva = pendingReservationsMap.get(cleanItemNum) || pendingReservationsMap.get(normalizeExpNumber(cleanItemNum));
             const currentFile = {
                 id: item.id,
                 number: item.number,
@@ -625,7 +769,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 assignment_type: item.assignment_type,
                 assignment_status: item.assignment_status,
                 outgoingDoc: outDoc,
-                pendingResignation: pendingRenuncia
+                pendingResignation: pendingRenuncia,
+                pendingReservationBatch: pendingReserva
             };
 
             if (groupedMap.has(item.number)) {
@@ -653,6 +798,9 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 if (!existing.pendingResignation && pendingRenuncia) {
                     existing.pendingResignation = pendingRenuncia;
                 }
+                if (!existing.pendingReservationBatch && pendingReserva) {
+                    existing.pendingReservationBatch = pendingReserva;
+                }
             } else {
                 groupedMap.set(item.number, {
                     ...currentFile,
@@ -664,7 +812,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                         status: item.status
                     }],
                     outgoingDoc: outDoc,
-                    pendingResignation: pendingRenuncia
+                    pendingResignation: pendingRenuncia,
+                    pendingReservationBatch: pendingReserva
                 });
             }
         });
@@ -893,8 +1042,12 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
     setMatchedAssignment(null);
     setMatchedResignation(null);
     setConcludeResignationOnSave(false);
+    setMatchedReservationBatch(null);
+    setMatchedReservationCount(null);
+    setConcludeReservationOnSave(false);
     setUpdateOutgoingStatus(false);
     autoOpenedResignationExpRef.current = '';
+    autoOpenedReservationExpRef.current = '';
   };
 
   const openConcludeFromRegistration = () => {
@@ -1049,12 +1202,187 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
     }
   };
 
+  const openConcludeReservationFromRegistration = () => {
+    if (!matchedReservationBatch || matchedReservationBatch.status === 'Finalizado') return;
+    setConcludeReservationModalState({
+      isOpen: true,
+      batch: matchedReservationBatch,
+      studentCount: matchedReservationCount,
+      mode: 'from-registration',
+      tableFile: null,
+      initialResNumber: extractResolutionHint(newSubject),
+      outgoingFileId: matchedOutgoingFile?.id
+    });
+  };
+
+  const openConcludeReservationFromTableRow = async (file: GroupedIncomingFile) => {
+    if (!file.pendingReservationBatch) return;
+    const batch = file.pendingReservationBatch;
+    setConcludeReservationModalState({
+      isOpen: true,
+      batch,
+      studentCount: null,
+      mode: 'from-table',
+      tableFile: file,
+      initialResNumber: extractResolutionHint(file.subject),
+      outgoingFileId: file.outgoingDoc?.id
+    });
+    try {
+      const { count } = await supabase
+        .from('reserva_vacantes_detalles')
+        .select('id', { count: 'exact', head: true })
+        .eq('batch_id', batch.id);
+      if (typeof count === 'number') {
+        setConcludeReservationModalState(prev =>
+          prev.isOpen && prev.batch?.id === batch.id ? { ...prev, studentCount: count } : prev
+        );
+      }
+    } catch {
+      // ignore count lookup error
+    }
+  };
+
+  const handleReservationConcludedFromIncoming = async (result: ConcludeReservationResult) => {
+    if (concludeReservationModalState.mode === 'from-registration') {
+      const cleanNum = newNumber.trim();
+      if (cleanNum) {
+        const { data: existingPending } = await supabase
+          .from('expedientes')
+          .select('id')
+          .eq('number', cleanNum)
+          .eq('assignment_status', 'pending');
+
+        if (existingPending && existingPending.length > 0) {
+          await supabase
+            .from('expedientes')
+            .update({ assignment_status: 'completed' })
+            .eq('number', cleanNum)
+            .eq('assignment_status', 'pending');
+
+          await supabase.from('tramite_seguimiento').insert([{
+            action_type: 'Asignación',
+            description: `Asignación de operador finalizada automáticamente al concluir el bloque de reserva del expediente Nº ${cleanNum}.`,
+            user_name: user.name
+          }]);
+        }
+
+        const typedSubject = newSubject.trim().toUpperCase();
+        const autoSubject = `RESOLUCIÓN DE RESERVA DE VACANTE: ${result.resolutionNumber} (${result.batch.report_code})`.toUpperCase();
+
+        const { error: insertErr } = await supabase.from('expedientes').insert([{
+          number: cleanNum,
+          subject: typedSubject || autoSubject,
+          status: 'Atendido',
+          created_by: user.id
+        }]);
+        if (insertErr) throw insertErr;
+
+        await supabase
+          .from('expedientes')
+          .update({ status: 'Atendido' })
+          .eq('number', cleanNum)
+          .eq('status', 'Pendiente');
+
+        if (matchedOutgoingFile?.id) {
+          await supabase
+            .from('expedientes_salida')
+            .update({ status: 'Finalizado' })
+            .eq('id', matchedOutgoingFile.id);
+
+          await supabase.from('tramite_seguimiento').insert([{
+            expediente_id: matchedOutgoingFile.id,
+            action_type: 'Estado',
+            description: `Se recibió ${result.resolutionNumber} y se concluyó directamente el bloque de Reserva de Vacante (${result.batch.report_code}).`,
+            user_name: user.name
+          }]);
+        }
+
+        await supabase
+          .from('expedientes_salida')
+          .update({ status: 'Finalizado' })
+          .eq('ref_number', cleanNum)
+          .eq('status', 'Pendiente');
+      }
+
+      setConcludeReservationModalState({
+        isOpen: false,
+        batch: null,
+        studentCount: null,
+        mode: 'from-registration',
+        tableFile: null,
+        initialResNumber: '',
+        outgoingFileId: undefined
+      });
+      handleCloseRegistrationModal();
+      fetchFiles();
+      if (notify) {
+        notify(
+          `Expediente Nº ${cleanNum} registrado y bloque de reserva (${result.batch.report_code}) concluido con ${result.resolutionNumber}.`,
+          'success'
+        );
+      }
+      return;
+    }
+
+    // Modo 'from-table': concluir bloque de reserva desde un expediente entrante ya registrado en la tabla
+    const targetFile = concludeReservationModalState.tableFile;
+    if (targetFile) {
+      await supabase
+        .from('expedientes')
+        .update({ status: 'Atendido', assignment_status: targetFile.assigned_to ? 'completed' : targetFile.assignment_status })
+        .eq('number', targetFile.number);
+
+      if (targetFile.outgoingDoc?.id) {
+        await supabase
+          .from('expedientes_salida')
+          .update({ status: 'Finalizado' })
+          .eq('id', targetFile.outgoingDoc.id);
+
+        await supabase.from('tramite_seguimiento').insert([{
+          expediente_id: targetFile.outgoingDoc.id,
+          action_type: 'Estado',
+          description: `Se registró ${result.resolutionNumber} y se concluyó el bloque de Reserva de Vacante (${result.batch.report_code}).`,
+          user_name: user.name
+        }]);
+      }
+
+      await supabase
+        .from('expedientes_salida')
+        .update({ status: 'Finalizado' })
+        .eq('ref_number', targetFile.number)
+        .eq('status', 'Pendiente');
+    }
+
+    setConcludeReservationModalState({
+      isOpen: false,
+      batch: null,
+      studentCount: null,
+      mode: 'from-registration',
+      tableFile: null,
+      initialResNumber: '',
+      outgoingFileId: undefined
+    });
+    fetchFiles();
+    if (notify) {
+      notify(
+        `Bloque de Reserva de Vacante (${result.batch.report_code}) concluido con éxito (${result.resolutionNumber}).`,
+        'success'
+      );
+    }
+  };
+
   const handleSaveIndividual = async () => {
     if (!newNumber.trim()) return;
 
     // Si es un retorno de renuncia pendiente y está marcada la opción de concluir, abrir el modal de Concluir Renuncia
     if (matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) {
       openConcludeFromRegistration();
+      return;
+    }
+
+    // Si es un retorno de bloque de Reserva de Vacante en trámite y está marcada la opción de concluir, abrir Adjuntar Resolución
+    if (matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave) {
+      openConcludeReservationFromRegistration();
       return;
     }
 
@@ -1223,6 +1551,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         /RESOLUCI[ÓO]N|\bVRAC\b/i.test(file.subject || '')
       ) {
         openConcludeFromTableRow(groupedFile);
+        return;
+      }
+      if (
+        groupedFile.pendingReservationBatch &&
+        /RESOLUCI[ÓO]N|\bVRAC\b/i.test(file.subject || '')
+      ) {
+        openConcludeReservationFromTableRow(groupedFile);
         return;
       }
 
@@ -2633,6 +2968,29 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         onConcluded={handleConcludedFromIncoming}
       />
 
+      {/* MODAL ADJUNTAR RESOLUCIÓN DE RESERVA DE VACANTE DESDE EXPEDIENTES ENTRANTES */}
+      <ConcludeReservationModal
+        isOpen={concludeReservationModalState.isOpen}
+        batch={concludeReservationModalState.batch}
+        studentCount={concludeReservationModalState.studentCount}
+        user={user}
+        initialResolutionNumber={concludeReservationModalState.initialResNumber}
+        outgoingFileId={concludeReservationModalState.outgoingFileId}
+        contextLabel={
+          concludeReservationModalState.mode === 'from-registration'
+            ? 'Retorno Detectado • Bloque de Reserva de Vacante'
+            : 'Conclusión Directa • Reserva de Vacante'
+        }
+        notify={notify}
+        onClose={() => {
+          setConcludeReservationModalState(prev => ({ ...prev, isOpen: false }));
+          if (concludeReservationModalState.mode === 'from-registration') {
+            setConcludeReservationOnSave(false);
+          }
+        }}
+        onConcluded={handleReservationConcludedFromIncoming}
+      />
+
       {/* MODAL REGISTRO INDIVIDUAL */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in zoom-in-95 duration-200">
@@ -2648,9 +3006,14 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                             value={newNumber} 
                             onChange={e => setNewNumber(e.target.value)} 
                             onKeyDown={e => {
-                              if (e.key === 'Enter' && matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) {
-                                e.preventDefault();
-                                openConcludeFromRegistration();
+                              if (e.key === 'Enter') {
+                                if (matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) {
+                                  e.preventDefault();
+                                  openConcludeFromRegistration();
+                                } else if (matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave) {
+                                  e.preventDefault();
+                                  openConcludeReservationFromRegistration();
+                                }
                               }
                             }}
                             className="h-14 px-5 rounded-2xl border-2 border-slate-100 bg-slate-50 text-slate-900 font-bold outline-none focus:border-primary focus:bg-white transition-all text-xl" 
@@ -2691,7 +3054,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                           </div>
                       )}
                       
-                      {(matchedOutgoingFile || matchedResignation) && (
+                      {(matchedOutgoingFile || matchedResignation || matchedReservationBatch) && (
                           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 overflow-hidden">
                               <div className="flex items-center gap-2 text-blue-700">
                                   <span className="material-symbols-outlined text-xl shrink-0">info</span>
@@ -2776,6 +3139,73 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                 </div>
                               )}
 
+                              {matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && (
+                                <div className="bg-emerald-50/90 border border-emerald-200 rounded-xl p-3.5 flex flex-col gap-2.5">
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="flex flex-col gap-0.5 min-w-0">
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                                        <span className="material-symbols-outlined text-[15px] text-emerald-600">bookmarks</span>
+                                        Bloque de Reserva de Vacante en Trámite
+                                      </span>
+                                      <p className="text-xs font-black text-slate-900 uppercase break-words">
+                                        {matchedReservationBatch.report_code}
+                                      </p>
+                                      <p className="text-[10px] font-bold text-slate-500 uppercase">
+                                        {[
+                                          matchedReservationBatch.expediente_number ? `EXP. ${matchedReservationBatch.expediente_number}` : '',
+                                          typeof matchedReservationCount === 'number' && matchedReservationCount > 0
+                                            ? `${matchedReservationCount} ${matchedReservationCount === 1 ? 'ESTUDIANTE EN BLOQUE' : 'ESTUDIANTES EN BLOQUE'}`
+                                            : ''
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' • ')}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={openConcludeReservationFromRegistration}
+                                      className="shrink-0 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black uppercase shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                                    >
+                                      <span className="material-symbols-outlined text-[15px]">task_alt</span>
+                                      Adjuntar Resolución
+                                    </button>
+                                  </div>
+
+                                  <label className="flex items-center gap-2.5 cursor-pointer pt-2 border-t border-emerald-200/70 group">
+                                    <div
+                                      className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                                        concludeReservationOnSave
+                                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                                          : 'bg-white border-slate-300 group-hover:border-emerald-400'
+                                      }`}
+                                    >
+                                      {concludeReservationOnSave && (
+                                        <span className="material-symbols-outlined text-[12px] font-bold">check</span>
+                                      )}
+                                    </div>
+                                    <input
+                                      type="checkbox"
+                                      className="hidden"
+                                      checked={concludeReservationOnSave}
+                                      onChange={e => setConcludeReservationOnSave(e.target.checked)}
+                                    />
+                                    <span className="text-[11px] font-bold text-emerald-950 select-none">
+                                      Finalizar bloque de reserva con Resolución al registrar (desmarque si es solo observación)
+                                    </span>
+                                  </label>
+                                </div>
+                              )}
+
+                              {matchedReservationBatch?.status === 'Finalizado' && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2.5 flex items-center gap-2 text-emerald-800 text-xs font-bold">
+                                  <span className="material-symbols-outlined text-base text-emerald-600">verified</span>
+                                  <span>
+                                    Bloque de Reserva ya finalizado
+                                    {matchedReservationBatch.resolution_number ? ` (${matchedReservationBatch.resolution_number})` : ''}.
+                                  </span>
+                                </div>
+                              )}
+
                               {matchedOutgoingFile && (
                                 <label className="flex items-center gap-3 cursor-pointer mt-0.5 group">
                                     <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${updateOutgoingStatus ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-slate-300 group-hover:border-blue-400'}`}>
@@ -2796,7 +3226,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                       <label className="flex flex-col gap-2">
                           <div className="flex items-center justify-between ml-1">
                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asunto</span>
-                              {matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave && (
+                              {((matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) ||
+                                (matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave)) && (
                                   <span className="text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full uppercase">
                                       Autocompletable con la Resolución
                                   </span>
@@ -2816,6 +3247,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                             placeholder={
                               matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
                                 ? 'Opcional: se completará automáticamente con el Nº de Resolución VRAC al concluir la renuncia...'
+                                : matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave
+                                ? 'Opcional: se completará automáticamente con el Nº de Resolución al finalizar el bloque de reserva...'
                                 : 'Describa el asunto...'
                             } 
                           />
@@ -2828,10 +3261,15 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                           disabled={
                             isSubmitting ||
                             !newNumber.trim() ||
-                            (!(matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) && !newSubject.trim())
+                            (
+                              !(matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) &&
+                              !(matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave) &&
+                              !newSubject.trim()
+                            )
                           }
                           className={`px-8 py-4 text-white rounded-2xl text-xs font-black uppercase shadow-xl active:scale-95 transition-all disabled:opacity-50 ${
-                            matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
+                            (matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave) ||
+                            (matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave)
                               ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30'
                               : 'bg-primary shadow-primary/30'
                           }`}
@@ -2840,6 +3278,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                             ? 'GUARDANDO...'
                             : matchedResignation?.status === 'Pendiente Resolución' && concludeResignationOnSave
                             ? 'CONCLUIR RENUNCIA'
+                            : matchedReservationBatch && matchedReservationBatch.status !== 'Finalizado' && concludeReservationOnSave
+                            ? 'ADJUNTAR RESOLUCIÓN'
                             : 'REGISTRAR'}
                       </button>
                   </div>
@@ -3881,6 +4321,16 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                     className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-600/20 hover:scale-105 transition-all active:scale-95 flex items-center gap-1"
                                                   >
                                                     <span className="material-symbols-outlined text-[14px]">gavel</span>
+                                                    CONCLUIR
+                                                  </button>
+                                                )}
+                                                {!file.pendingResignation && file.pendingReservationBatch && (
+                                                  <button
+                                                    onClick={() => openConcludeReservationFromTableRow(file)}
+                                                    title={`Adjuntar resolución y finalizar bloque de reserva ${file.pendingReservationBatch.report_code}`}
+                                                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-emerald-600/20 hover:scale-105 transition-all active:scale-95 flex items-center gap-1"
+                                                  >
+                                                    <span className="material-symbols-outlined text-[14px]">bookmarks</span>
                                                     CONCLUIR
                                                   </button>
                                                 )}
