@@ -2,6 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { getAllUsers, AdminUserItem } from '../lib/usersApi';
 import * as XLSX from 'xlsx';
+import {
+  formatOutgoingDestination,
+  formatOutgoingDocTitle,
+  parseOutgoingDestinationMeta
+} from '../lib/outgoingFormatters';
 
 export type AuditModule =
   | 'Todos'
@@ -167,15 +172,9 @@ export const SystemLogs: React.FC = () => {
       const pdfByExpNumber = new Map<string, { url: string; isGen: boolean; docType: string }>();
 
       salidas.forEach((s) => {
-        let isGen = false;
-        let expNum = s.ref_number;
-        if (s.destination && s.destination.startsWith('{')) {
-          try {
-            const meta = JSON.parse(s.destination);
-            if (meta.expediente_numero) expNum = meta.expediente_numero;
-            isGen = true;
-          } catch (e) {}
-        }
+        const meta = parseOutgoingDestinationMeta(s.destination);
+        let isGen = Boolean(meta);
+        let expNum = meta?.expediente_numero || s.ref_number;
         if (s.doc_number && (s.doc_number.startsWith('UNSAAC-CONST-') || s.doc_number.startsWith('UNSAAC-INF-') || s.doc_type?.toLowerCase().includes('informe') || s.doc_type?.toLowerCase().includes('constancia'))) {
           isGen = true;
         }
@@ -368,23 +367,11 @@ export const SystemLogs: React.FC = () => {
       // 3. Fetch expedientes_salida (Diferenciación Forense: Emisión Oficial vs Documento Adjunto Manual)
       if (salidas) {
         salidas.forEach((s) => {
-          let studentName = '';
-          let studentDni = s.ref_number || '';
-          let studentCareer = '';
-          let issuedUser = '';
-          let parsedMeta: any = null;
-
-          if (s.destination && s.destination.startsWith('{')) {
-            try {
-              parsedMeta = JSON.parse(s.destination);
-              studentName = parsedMeta.estudiante_nombre || '';
-              studentDni = parsedMeta.estudiante_dni || studentDni;
-              studentCareer = parsedMeta.carrera || '';
-              issuedUser = parsedMeta.usuario_nombre || '';
-            } catch (e) {
-              // ignore
-            }
-          }
+          const parsedMeta = parseOutgoingDestinationMeta(s.destination);
+          let studentName = parsedMeta?.estudiante_nombre || '';
+          let studentDni = parsedMeta?.estudiante_dni || s.ref_number || '';
+          let studentCareer = parsedMeta?.carrera || '';
+          let issuedUser = parsedMeta?.usuario_nombre || '';
 
           // Resolver nombre y rol del operador
           if (!issuedUser && s.created_by) {
@@ -418,9 +405,10 @@ export const SystemLogs: React.FC = () => {
 
           if (isSystemGenerated) {
             const docTypeName = parsedMeta?.tipo_documento || s.doc_type || (isReportTitle ? 'Informe Oficial' : 'Constancia Oficial');
+            const formattedDocLabel = formatOutgoingDocTitle(docTypeName, s.doc_number);
             const descDetail = studentName
-              ? `Emitió ${docTypeName} Nº ${s.doc_number || ''} para ${studentName} (DNI: ${studentDni})${studentCareer ? ` - Carrera: ${studentCareer}` : ''} [Documento Generado por Sistema]`
-              : `Emitió ${docTypeName} Nº ${s.doc_number || ''} [Generado Oficialmente por el Sistema]`;
+              ? `Emitió ${formattedDocLabel} para ${studentName} (DNI: ${studentDni})${studentCareer ? ` - Carrera: ${studentCareer}` : ''} [Documento Generado por Sistema]`
+              : `Emitió ${formattedDocLabel} [Generado Oficialmente por el Sistema]`;
 
             allLogs.push({
               id: `sal-${s.id}`,
@@ -444,7 +432,8 @@ export const SystemLogs: React.FC = () => {
           } else if (isConstanciaTitle) {
             // CASO OBSERVADO: El operador ingresó una salida con carátula "Constancia" y adjuntó un PDF manual.
             // NO fue generado por el sistema de plantillas.
-            const descDetail = `Registró expediente de salida rotulado como "${s.doc_type || 'Constancia'}" Nº ${s.doc_number || ''} (Ref: ${s.ref_number || '-'}) adjuntando archivo PDF externo hacia ${s.destination || 'ESTUDIANTE'}. [AVISO FORENSE: Documento adjuntado de forma manual; NO fue generado por el sistema ni cuenta con código QR oficial].`;
+            const cleanDest = formatOutgoingDestination(s.destination, 'ESTUDIANTE');
+            const descDetail = `Registró expediente de salida rotulado como "${s.doc_type || 'Constancia'}" Nº ${s.doc_number || ''} (Ref: ${s.ref_number || '-'}) adjuntando archivo PDF externo hacia ${cleanDest}. [AVISO FORENSE: Documento adjuntado de forma manual; NO fue generado por el sistema ni cuenta con código QR oficial].`;
 
             allLogs.push({
               id: `sal-${s.id}`,
@@ -467,7 +456,9 @@ export const SystemLogs: React.FC = () => {
             });
           } else {
             // Expediente de salida ordinario (Oficio, Informe, Carta, Proveído, etc.)
-            const descDetail = `Registró salida de ${s.doc_type || 'Documento'} Nº ${s.doc_number || ''} - ${s.subject || ''} (Destino: ${s.destination || '-'})${hasAttachedPdf ? ' [Con archivo PDF adjunto]' : ''}`;
+            const cleanDest = formatOutgoingDestination(s.destination, '-');
+            const formattedDocLabel = formatOutgoingDocTitle(s.doc_type || 'Documento', s.doc_number);
+            const descDetail = `Registró salida de ${formattedDocLabel} - ${s.subject || ''} (Destino: ${cleanDest})${hasAttachedPdf ? ' [Con archivo PDF adjunto]' : ''}`;
 
             allLogs.push({
               id: `sal-${s.id}`,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { formatOutgoingDestination, formatOutgoingDocTitle } from '../lib/outgoingFormatters';
 
 interface PendingFollowupModalProps {
   onClose: () => void;
@@ -23,6 +24,7 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
   const [data, setData] = useState<FileWithTracking[]>([]);
   const [loading, setLoading] = useState(true);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -76,7 +78,7 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
       setData(combined);
     } catch (err: any) {
       console.error(err);
-      alert('Error fetching pending files: ' + err.message);
+      setErrorMessage('Error al cargar expedientes pendientes: ' + (err?.message || 'Error desconocido'));
     } finally {
       setLoading(false);
     }
@@ -129,7 +131,7 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
       
       pdf.save(`Reporte_Pendientes_Seguimiento_${new Date().toISOString().split('T')[0]}.pdf`);
     } catch (err: any) {
-      alert("Error al generar PDF: " + err.message);
+      setErrorMessage('Error al generar PDF: ' + (err?.message || 'Error desconocido'));
     } finally {
       setGeneratingPdf(false);
     }
@@ -168,6 +170,14 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
 
         {/* Content */}
         <div className="p-3.5 sm:p-8 overflow-auto flex-1 hide-scrollbar">
+          {errorMessage && (
+            <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center justify-between gap-2">
+              <span>{errorMessage}</span>
+              <button onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700">
+                <span className="material-symbols-outlined text-base">close</span>
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="flex flex-col items-center justify-center h-64 text-slate-400">
               <span className="material-symbols-outlined text-4xl animate-spin mb-4">progress_activity</span>
@@ -196,10 +206,12 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
                   return (
                     <div key={file.id} className="report-item bg-white flex flex-row gap-4 p-4 border border-slate-200 rounded-xl w-full">
                       {/* Left: Document Details */}
-                      <div className="flex-[0.8] flex flex-col gap-1.5 pr-4 border-r border-slate-100 min-w-[260px]">
+                      <div className="flex-[0.8] flex flex-col gap-1.5 pr-4 border-r border-slate-100 min-w-[260px] max-w-[380px] overflow-hidden">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-black text-slate-900">{file.doc_type} {file.doc_number}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                          <span className="text-sm font-black text-slate-900 break-words">
+                            {formatOutgoingDocTitle(file.doc_type, file.doc_number)}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase shrink-0 ${
                               daysPending > 15 ? 'bg-red-100 text-red-700' :
                               daysPending > 5 ? 'bg-amber-100 text-amber-700' :
                               'bg-emerald-100 text-emerald-700'
@@ -215,11 +227,11 @@ export const PendingFollowupModal: React.FC<PendingFollowupModalProps> = ({ onCl
                             </div>
                         )}
 
-                        <p className="text-xs text-slate-700 font-medium leading-tight mt-1">{file.subject}</p>
+                        <p className="text-xs text-slate-700 font-medium leading-tight mt-1 break-words">{file.subject}</p>
                         
                         {file.destination && file.destination !== '-' && (
-                          <div className="mt-auto pt-2 text-[10px] font-bold uppercase text-slate-400">
-                            Destino: <span className="text-slate-700">{file.destination}</span>
+                          <div className="mt-auto pt-2 text-[10px] font-bold uppercase text-slate-400 break-words">
+                            Destino: <span className="text-slate-700">{formatOutgoingDestination(file.destination)}</span>
                           </div>
                         )}
                       </div>

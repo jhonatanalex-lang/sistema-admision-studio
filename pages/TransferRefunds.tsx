@@ -4,6 +4,11 @@ import { supabase } from '../lib/supabaseClient';
 import { PaymentRegistry, User } from '../types';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import {
+  formatOutgoingDestination,
+  extractOutgoingOfficeDestination,
+  mergeOutgoingDestinationOffice
+} from '../lib/outgoingFormatters';
 
 const ITEMS_PER_PAGE = 50;
 
@@ -183,7 +188,7 @@ export const TransferRefunds: React.FC<{ user: User }> = ({ user }) => {
       setSelectedBlockForExpediente(blockId);
       const existingData = expedientesData[blockId];
       setExpedienteRefNumber(existingData?.ref_number || '');
-      setExpedienteDestination(existingData?.destination || '');
+      setExpedienteDestination(extractOutgoingOfficeDestination(existingData?.destination));
       setExpedienteFile(null);
       setIsExpedienteModalOpen(true);
   };
@@ -192,7 +197,8 @@ export const TransferRefunds: React.FC<{ user: User }> = ({ user }) => {
       if (!selectedBlockForExpediente || !expedienteRefNumber.trim()) return;
       setIsSubmitting(true);
       try {
-          let publicUrl = expedientesData[selectedBlockForExpediente]?.pdf_url || null;
+          const existingRecord = expedientesData[selectedBlockForExpediente];
+          let publicUrl = existingRecord?.pdf_url || null;
           
           if (expedienteFile) {
               const sanitizedName = expedienteFile.name.replace(/[^a-zA-Z0-9.]/g, '_');
@@ -212,9 +218,14 @@ export const TransferRefunds: React.FC<{ user: User }> = ({ user }) => {
               publicUrl = urlData.publicUrl;
           }
 
+          const persistedDestination = mergeOutgoingDestinationOffice(
+              existingRecord?.destination,
+              expedienteDestination
+          );
+
           const { error } = await supabase.from('expedientes_salida').update({
               ref_number: expedienteRefNumber.trim(),
-              destination: expedienteDestination.trim().toUpperCase(),
+              destination: persistedDestination,
               pdf_url: publicUrl
           }).eq('doc_number', selectedBlockForExpediente);
 
@@ -903,10 +914,10 @@ export const TransferRefunds: React.FC<{ user: User }> = ({ user }) => {
                                         </div>
 
                                         {expedientesData[blockId]?.ref_number && (
-                                            <p className="text-xs font-black text-emerald-600 mt-1 flex items-center gap-1">
+                                            <p className="text-xs font-black text-emerald-600 mt-1 flex items-center gap-1 flex-wrap">
                                                 <span className="material-symbols-outlined text-[15px]">inventory_2</span>
                                                 EXP: {expedientesData[blockId].ref_number}
-                                                {expedientesData[blockId]?.destination && ` ➔ ${expedientesData[blockId].destination}`}
+                                                {expedientesData[blockId]?.destination && ` ➔ ${formatOutgoingDestination(expedientesData[blockId].destination, '')}`}
                                             </p>
                                         )}
                                     </div>

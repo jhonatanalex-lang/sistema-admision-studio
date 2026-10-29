@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Participant, User } from '../types';
+import { Participant, ToastMessage, User } from '../types';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -125,6 +125,10 @@ export const fixCareerName = (codeOrName: string | undefined | null): string => 
     if (!codeOrName) return '';
     const str = String(codeOrName).trim();
     if (!str) return '';
+    const upper = str.toUpperCase();
+    if (upper === 'NULL' || upper === 'NONE' || upper === 'UNDEFINED' || upper === 'N/A' || upper === 'NA' || upper === '-') {
+        return '';
+    }
 
     // Si es puramente numérico (ej. "117", "0117", "204")
     if (/^\d+$/.test(str)) {
@@ -140,10 +144,371 @@ export const fixCareerName = (codeOrName: string | undefined | null): string => 
         const code = codeMatch[1].replace(/^0+/, '');
         const rest = codeMatch[2].trim();
         if (CAREER_CODE_MAP[code]) return CAREER_CODE_MAP[code];
-        if (rest) return fixEncoding(rest);
+        if (rest && rest.toUpperCase() !== 'NULL') return fixEncoding(rest);
     }
 
     return fixEncoding(str);
+};
+
+export const isApplicantAdmitted = (obsOrCondicion?: string | null, rawRow?: any): boolean => {
+    const rawObs = String(
+        obsOrCondicion ??
+        rawRow?.OBSERVACION ??
+        rawRow?.observacion ??
+        rawRow?.Condicion ??
+        rawRow?.condicion ??
+        rawRow?.ESTADO ??
+        ''
+    ).trim();
+
+    const normalizedObs = rawObs
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase();
+
+    if (
+        normalizedObs.includes('NO INGRESA') ||
+        normalizedObs.includes('NO INGRESO') ||
+        normalizedObs.includes('NO INGRESANTE') ||
+        normalizedObs.includes('NO ADMITIDO') ||
+        normalizedObs.includes('NO_INGRESA') ||
+        normalizedObs.includes('NO ALCANZ') ||
+        normalizedObs.includes('SIN VACANTE') ||
+        normalizedObs.includes('NO SE PRESENTO') ||
+        normalizedObs === 'NSP' ||
+        normalizedObs.startsWith('NSP ') ||
+        normalizedObs.includes('AUSENTE') ||
+        normalizedObs.includes('DESCALIFICADO')
+    ) {
+        return false;
+    }
+
+    if (rawRow) {
+        const ingFlag = rawRow.Ingresante ?? rawRow.ingresante;
+        if (ingFlag === 0 || ingFlag === '0' || ingFlag === false) {
+            return false;
+        }
+        if (ingFlag === 1 || ingFlag === '1' || ingFlag === true) {
+            return true;
+        }
+    }
+
+    return (
+        normalizedObs.includes('INGRESA') ||
+        normalizedObs.includes('INGRESO') ||
+        normalizedObs.includes('ADMITIDO') ||
+        normalizedObs === 'SI'
+    );
+};
+
+interface PreRevisionBatchMeta {
+    id: string;
+    modalidad_id: string;
+    modalidadNombre: string;
+    semestre: string;
+    anio: string;
+}
+
+let preRevisionIndexCache: { fetchedAt: number; batches: PreRevisionBatchMeta[] } | null = null;
+const parsedBatchRowsCache = new Map<string, { fetchedAt: number; rows: any[] }>();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+const normalizeForSearch = (val: string): string =>
+    val
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9\s]/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
+
+const getPreRevisionBatchIndex = async (): Promise<PreRevisionBatchMeta[]> => {
+    const now = Date.now();
+    if (preRevisionIndexCache && now - preRevisionIndexCache.fetchedAt < CACHE_TTL_MS) {
+        return preRevisionIndexCache.batches;
+    }
+
+    const [archivosRes, modsRes, cuadrosRes] = await Promise.all([
+        supabase.from('pre_revision_archivos').select('id, modalidad_id'),
+        supabase.from('cv_modalidades').select('id, nombre, semestre, cuadro_id'),
+        supabase.from('cv_cuadros_anuales').select('id, anio')
+    ]);
+
+    const cuadrosMap = new Map<string, string>();
+    (cuadrosRes.data || []).forEach((c: any) => {
+        if (c?.id) cuadrosMap.set(String(c.id), String(c.anio || ''));
+    });
+
+    const modsMap = new Map<string, { nombre: string; semestre: string; anio: string }>();
+    (modsRes.data || []).forEach((m: any) => {
+        if (m?.id) {
+            modsMap.set(String(m.id), {
+                nombre: String(m.nombre || ''),
+                semestre: String(m.semestre || ''),
+                anio: m.cuadro_id ? (cuadrosMap.get(String(m.cuadro_id)) || '') : ''
+            });
+        }
+    });
+
+    const batches: PreRevisionBatchMeta[] = (archivosRes.data || []).map((a: any) => {
+        const modInfo = a?.modalidad_id ? modsMap.get(String(a.modalidad_id)) : undefined;
+        return {
+            id: String(a.id),
+            modalidad_id: String(a.modalidad_id || ''),
+            modalidadNombre: modInfo?.nombre || '',
+            semestre: modInfo?.semestre || '',
+            anio: modInfo?.anio || ''
+        };
+    });
+
+    preRevisionIndexCache = { fetchedAt: now, batches };
+    return batches;
+};
+
+const extractRowsFromBatchPayload = (csvData: any): any[] => {
+    if (!csvData) return [];
+    let parsed = csvData;
+    if (typeof csvData === 'string') {
+        try {
+            parsed = JSON.parse(csvData);
+        } catch (_) {
+            return [];
+        }
+    }
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') {
+        if (Array.isArray(parsed.postulantes)) return parsed.postulantes;
+        if (Array.isArray(parsed.data)) return parsed.data;
+        if (Array.isArray(parsed.rows)) return parsed.rows;
+    }
+    return [];
+};
+
+const fetchBatchRowsById = async (batchId: string): Promise<any[]> => {
+    const now = Date.now();
+    const cached = parsedBatchRowsCache.get(batchId);
+    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+        return cached.rows;
+    }
+
+    const { data, error } = await supabase
+        .from('pre_revision_archivos')
+        .select('id, csv_data')
+        .eq('id', batchId)
+        .single();
+
+    if (error || !data) return [];
+    const rows = extractRowsFromBatchPayload(data.csv_data);
+
+    if (parsedBatchRowsCache.size >= 8) {
+        const oldestKey = parsedBatchRowsCache.keys().next().value;
+        if (oldestKey) parsedBatchRowsCache.delete(oldestKey);
+    }
+    parsedBatchRowsCache.set(batchId, { fetchedAt: now, rows });
+    return rows;
+};
+
+const runWithConcurrency = async <T,>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T) => Promise<void>
+): Promise<void> => {
+    if (items.length === 0) return;
+    const queue = [...items];
+    const workersCount = Math.min(concurrency, queue.length);
+    await Promise.all(
+        Array.from({ length: workersCount }, async () => {
+            while (queue.length > 0) {
+                const next = queue.shift();
+                if (next !== undefined) {
+                    await worker(next);
+                }
+            }
+        })
+    );
+};
+
+const searchPreRevisionApplicants = async (rawTerm: string): Promise<any[]> => {
+    const term = rawTerm.trim();
+    if (!term) return [];
+    const isNumeric = /^\d+$/.test(term);
+    if (!isNumeric && term.length < 3) return [];
+
+    try {
+        const batches = await getPreRevisionBatchIndex();
+        if (batches.length === 0) return [];
+
+        const batchMap = new Map<string, PreRevisionBatchMeta>();
+        batches.forEach(b => batchMap.set(b.id, b));
+
+        const searchWords = isNumeric
+            ? [term]
+            : term
+                .split(/[\s,\-/]+/)
+                .map(w => w.trim())
+                .filter(w => w.length >= 2);
+
+        if (searchWords.length === 0) return [];
+
+        const buildFilterQuery = (ids: string[]) => {
+            let q = supabase.from('pre_revision_archivos').select('id').in('id', ids);
+            if (isNumeric) {
+                // LIKE (case-sensitive) es mucho más rápido que ILIKE para dígitos en columnas TOAST grandes
+                q = q.like('csv_data', `%${term}%`);
+            } else {
+                searchWords.forEach(word => {
+                    const agnostic = word.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
+                    q = q.ilike('csv_data', `%${agnostic}%`);
+                });
+            }
+            return q;
+        };
+
+        // Escanear los lotes en bloques de 6 con concurrencia máxima de 3 para no saturar vCPU de Postgres ni disparar 57014
+        const CHUNK_SIZE = 6;
+        const chunks: string[][] = [];
+        const allIds = batches.map(b => b.id);
+        for (let i = 0; i < allIds.length; i += CHUNK_SIZE) {
+            chunks.push(allIds.slice(i, i + CHUNK_SIZE));
+        }
+
+        const matchedBatchIds = new Set<string>();
+        await runWithConcurrency(chunks, 3, async chunkIds => {
+            const { data, error } = await buildFilterQuery(chunkIds);
+            if (!error && data) {
+                data.forEach((row: any) => {
+                    if (row?.id) matchedBatchIds.add(String(row.id));
+                });
+            } else if (error) {
+                // Fallback individual con concurrencia controlada si un lote pesado demoró el bloque
+                await runWithConcurrency(chunkIds, 2, async singleId => {
+                    const { data: singleData } = await buildFilterQuery([singleId]);
+                    if (singleData && singleData.length > 0) {
+                        matchedBatchIds.add(singleId);
+                    }
+                });
+            }
+        });
+
+        if (matchedBatchIds.size === 0) return [];
+
+        const targetIds = Array.from(matchedBatchIds);
+        const normalizedWords = isNumeric ? [] : searchWords.map(normalizeForSearch).filter(Boolean);
+        const matchedApplicants: any[] = [];
+
+        await runWithConcurrency(targetIds, 2, async batchId => {
+            if (!isNumeric && matchedApplicants.length >= 60) return;
+            const meta = batchMap.get(batchId);
+            const rows = await fetchBatchRowsById(batchId);
+            for (let i = 0; i < rows.length; i++) {
+                const elem = rows[i];
+                if (!elem || typeof elem !== 'object') continue;
+
+                if (isNumeric) {
+                    const docNum = String(
+                        elem.NroDocumento ??
+                        elem.alumno ??
+                        elem.dni ??
+                        elem.DNI ??
+                        elem.CODPOSTULANTE ??
+                        elem.DOCUMENTO ??
+                        ''
+                    ).trim();
+                    if (docNum !== term) continue;
+                } else {
+                    const rawCandidateName = String(
+                        elem.nombre ??
+                        elem.Nombre ??
+                        elem.NOMBRE ??
+                        elem.POSTULANTE ??
+                        ''
+                    );
+                    if (!rawCandidateName) continue;
+                    const normCandidateName = normalizeForSearch(rawCandidateName);
+                    const allWordsMatch = normalizedWords.every(w => normCandidateName.includes(w));
+                    if (!allWordsMatch) continue;
+                }
+
+                matchedApplicants.push({
+                    ...elem,
+                    _preRevisionId: batchId,
+                    _modalidadId: meta?.modalidad_id || '',
+                    _modalidadNombre: meta?.modalidadNombre || '',
+                    _semestre: meta?.semestre || '',
+                    _anio: meta?.anio || ''
+                });
+
+                if (!isNumeric && matchedApplicants.length >= 60) break;
+            }
+        });
+
+        return matchedApplicants;
+    } catch (err) {
+        console.error('Error en búsqueda multi-lote pre_revision_archivos:', err);
+        return [];
+    }
+};
+
+const fetchAnnulledExamApplicants = async (rawTerm: string): Promise<any[]> => {
+    const term = rawTerm.trim();
+    if (!term) return [];
+    const isNumeric = /^\d+$/.test(term);
+    if (!isNumeric && term.length < 3) return [];
+
+    try {
+        let q = supabase.from('postulantes_examenes_anulados').select('*');
+        if (isNumeric) {
+            q = q.eq('dni', term).limit(20);
+        } else {
+            const words = term.split(/[\s,\-/]+/).filter(Boolean);
+            words.forEach(word => {
+                const agnostic = word.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
+                q = q.ilike('nombre_completo', `%${agnostic}%`);
+            });
+            q = q.limit(30);
+        }
+
+        const { data, error } = await q;
+        if (error || !data) return [];
+
+        return data.map((row: any) => {
+            const admittedDefinitive = row.ingresante_reprogramado === 1 || row.ingresante_reprogramado === '1' || row.ingresante_reprogramado === true;
+            const condicionDefinitiva = String(
+                row.condicion_final || (admittedDefinitive ? 'INGRESANTE' : 'NO INGRESA (EXAMEN REPROGRAMADO)')
+            );
+            return {
+                NroDocumento: String(row.dni || '').trim(),
+                nombre: String(row.nombre_completo || '').trim(),
+                carrera_nombre: row.carrera_nombre || row.codigo_carrera || '',
+                carrera_ingreso_nombre: admittedDefinitive ? (row.carrera_ingreso_reprogramado || row.carrera_nombre || '') : '',
+                notavigesimal: row.nota_reprogramado ?? row.nota_anulada ?? '',
+                POS: row.omerito_reprogramado ?? row.omerito_anulado ?? '',
+                OBSERVACION: condicionDefinitiva,
+                Ingresante: admittedDefinitive ? 1 : 0,
+                _modalidadId: String(row.modalidad_id || ''),
+                _modalidadNombre: String(row.modalidad_origen || 'CONCURSO DE ADMISIÓN ORDINARIO'),
+                _semestre: String(row.semestre || ''),
+                _anio: String(row.anio || ''),
+                _fromAnnulledTable: true,
+                examen_anulado: {
+                    resolucion: row.resolucion_anulacion,
+                    motivo: row.motivo_anulacion,
+                    fecha_examen_anulado: row.fecha_examen_anulado,
+                    nota_anulada: row.nota_anulada,
+                    omerito_anulado: row.omerito_anulado,
+                    ingresante_anulado: row.ingresante_anulado,
+                    fecha_segundo_examen: row.fecha_segundo_examen,
+                    nota_reprogramado: row.nota_reprogramado,
+                    omerito_reprogramado: row.omerito_reprogramado,
+                    ingresante_reprogramado: row.ingresante_reprogramado,
+                    condicion_final: row.condicion_final
+                }
+            };
+        });
+    } catch (err) {
+        console.debug('Aviso consultando postulantes_examenes_anulados:', err);
+        return [];
+    }
 };
 
 export function normalizeProcessKey(modalidad: string = '', semestre: string = '', anio: string | number = '', rawRow?: any): string {
@@ -297,7 +662,7 @@ export function getGroupedDocuments(documents: StudentDocument[] = []): Record<s
     return groups;
 }
 
-export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
+export const StudentLookup: React.FC<{ user: User; notify?: (message: string, type?: ToastMessage['type']) => void }> = ({ user, notify }) => {
   const navigate = useNavigate();
   const [activeMode, setActiveMode] = useState<SearchMode>('individual');
   
@@ -322,6 +687,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
 
   // Search State
   const [searchQuery, setSearchQuery] = useState('');
+  const [lastSearchedTerm, setLastSearchedTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<React.ReactNode | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -346,15 +712,69 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
   // Modal State for Batch Detail
   const [selectedBatchHistory, setSelectedBatchHistory] = useState<Participant[] | null>(null);
 
-  // Edit / Add Ingreso Records
+  // Edit / Add Ingreso Records (tabla oficial participantes)
   const [isEditing, setIsEditing] = useState(false);
   const [editingRecord, setEditingRecord] = useState<Participant | null>(null);
   const [editForm, setEditForm] = useState<Partial<Participant>>({});
   const [showSyncNameOption, setShowSyncNameOption] = useState(false);
+  const [syncNameChecked, setSyncNameChecked] = useState(false);
 
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [newStudentForm, setNewStudentForm] = useState<Partial<Participant>>({});
-  
+  const [participantWizardStep, setParticipantWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [showContingencySection, setShowContingencySection] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [duplicateExistingRecord, setDuplicateExistingRecord] = useState<Participant | null>(null);
+
+  // Catálogos oficiales para autocompletado y estandarización (AGENTS.md Regla 1)
+  const [officialModalidades, setOfficialModalidades] = useState<string[]>([]);
+  const [officialEscuelas, setOfficialEscuelas] = useState<Array<{ nombre: string; codigo_carrera: string; filial: string }>>([]);
+
+  const notifyUser = useCallback((msg: string, type: ToastMessage['type'] = 'info') => {
+    if (notify) {
+      notify(msg, type);
+    }
+  }, [notify]);
+
+  useEffect(() => {
+    let active = true;
+    const loadCatalogs = async () => {
+      try {
+        // Pre-calentar índice ligero de lotes de pre-revisión en paralelo
+        getPreRevisionBatchIndex().catch(() => {});
+        const [modsRes, escRes] = await Promise.all([
+          supabase.from('cv_modalidades').select('nombre').order('orden', { ascending: true }),
+          supabase.from('cv_escuelas').select('nombre, codigo_carrera, filial, is_hidden').order('orden', { ascending: true })
+        ]);
+        if (!active) return;
+        if (modsRes.data) {
+          const uniqueMods = Array.from(
+            new Set(
+              modsRes.data
+                .map((m: any) => String(m.nombre || '').trim().toUpperCase())
+                .filter(Boolean)
+            )
+          );
+          setOfficialModalidades(uniqueMods);
+        }
+        if (escRes.data) {
+          const cleanEscuelas = escRes.data
+            .filter((e: any) => !e.is_hidden && e.nombre)
+            .map((e: any) => ({
+              nombre: String(e.nombre || '').trim().toUpperCase(),
+              codigo_carrera: String(e.codigo_carrera || '').trim(),
+              filial: String(e.filial || 'CUSCO').trim().toUpperCase()
+            }));
+          setOfficialEscuelas(cleanEscuelas);
+        }
+      } catch (e) {
+        console.debug('No se pudieron cargar catálogos auxiliares:', e);
+      }
+    };
+    loadCatalogs();
+    return () => { active = false; };
+  }, []);
+
   // Local Documents State
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [docsError, setDocsError] = useState<string | null>(null);
@@ -463,17 +883,11 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
           console.error("Error fetching renuncias/reservas:", err);
       }
 
-      // 4. Si el postulante no tiene applications cargadas, consultar sus aplicaciones por DNI de forma segura
+      // 4. Si el postulante no tiene applications cargadas, consultar sus aplicaciones por DNI en todos los lotes
       let updatedApplications = [...profile.applications];
       if (updatedApplications.length === 0 && dni) {
           try {
-              const { data: rpcApps } = await supabase.rpc('buscar_postulante_pre_revision', { p_termino: dni });
-              let appList: any[] = [];
-              if (Array.isArray(rpcApps)) {
-                  appList = rpcApps;
-              } else if (typeof rpcApps === 'string') {
-                  try { appList = JSON.parse(rpcApps); } catch (_) {}
-              }
+              const appList = await searchPreRevisionApplicants(dni);
               if (Array.isArray(appList) && appList.length > 0) {
                   appList.forEach(r => {
                       const rawCarrera1 = r.carrera_nombre || r['Carrera 1'] || r.Carrera1 || r.carrera1 || r.Escuela1 || r.escuela1 || r.Carrera || r.carrera || r.COD_CARRERA || r.codigo_carrera || r.CARRERA || r.ESCUELA || r.escuela;
@@ -483,7 +897,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                       const rawNota = r.notavigesimal || r.Nota || r.nota || r.PUNTAJE || r.puntaje || r.NOTA || '';
                       const rawPuesto = r.POS || r.pos || r.PUESTO || r.puesto || r.OMERITO || r.omerito || '';
                       const obs = String(r.OBSERVACION || r.observacion || r.Condicion || r.condicion || r.ESTADO || '').toUpperCase();
-                      const isAdmittedInProcess = obs.includes('INGRESA') || obs.includes('INGRESO') || obs.includes('ADMITIDO') || obs === 'SI';
+                      const isAdmittedInProcess = isApplicantAdmitted(obs, r);
 
                       const appRec: ApplicantApplicationRecord = {
                           id: `${dni}-${updatedApplications.length}`,
@@ -609,8 +1023,9 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
   };
 
   // MULTI-LAYER UNIVERSAL SEARCH
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleSearch = async (overrideQuery?: string) => {
+    const rawTerm = typeof overrideQuery === 'string' ? overrideQuery : searchQuery;
+    if (!rawTerm.trim()) return;
     setLoading(true); 
     setError(null); 
     setSelectedProfile(null);
@@ -618,7 +1033,8 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
     setHasSearched(true);
     
     try {
-      const term = searchQuery.trim();
+      const term = rawTerm.trim();
+      setLastSearchedTerm(term);
       const isNumeric = /^\d+$/.test(term);
       
       // 1. Layer 1: Query 'participantes' (Ingresantes oficiales)
@@ -633,40 +1049,12 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
           });
           partQuery = partQuery.limit(60);
       }
-      
-      // Función para invocar el RPC de pre-revisión de forma segura y con timeout de 2.5s
-      const fetchRpcSafe = async (): Promise<any[]> => {
-          // Solo ejecutar RPC si es numérico (DNI) o si el término de búsqueda tiene al menos 3 caracteres
-          if (!isNumeric && term.length < 3) return [];
-          try {
-              const timeoutPromise = new Promise<any[]>(resolve => 
-                  setTimeout(() => resolve([]), 2500)
-              );
-              const rpcCall = (async () => {
-                  try {
-                      const res = await supabase.rpc('buscar_postulante_pre_revision', { p_termino: term });
-                      if (res.error) {
-                          console.debug('Aviso RPC buscar_postulante_pre_revision:', res.error.message || res.error);
-                          return [];
-                      }
-                      return res.data || [];
-                  } catch (err) {
-                      console.debug('Excepción RPC buscar_postulante_pre_revision:', err);
-                      return [];
-                  }
-              })();
 
-              const result = await Promise.race([rpcCall, timeoutPromise]);
-              return result;
-          } catch (_) {
-              return [];
-          }
-      };
-
-      // 1. Layer 1 & 2: Ejecutar en paralelo Ingresantes oficiales y Búsqueda server-side en Supabase RPC
-      const [partRes, rpcData] = await Promise.all([
+      // 1, 2 & 3: Ejecutar en paralelo Ingresantes oficiales, Lotes de Pre-Revisión (sin timeout 57014) y Exámenes Anulados
+      const [partRes, preData, annulledData] = await Promise.all([
           partQuery.order('ANIO', { ascending: false }).order('SEMESTRE', { ascending: false }),
-          fetchRpcSafe()
+          searchPreRevisionApplicants(term),
+          fetchAnnulledExamApplicants(term)
       ]);
 
       if (partRes.error) {
@@ -674,18 +1062,24 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
       }
       const partData = partRes.data || [];
 
-      // 2. Layer 2: Extraer resultados filtrados server-side de pre_revision_archivos
-      let preMatches: any[] = [];
-      if (Array.isArray(rpcData)) {
-          preMatches = rpcData;
-      } else if (typeof rpcData === 'string') {
-          try {
-              const parsed = JSON.parse(rpcData);
-              if (Array.isArray(parsed)) preMatches = parsed;
-          } catch (e) {
-              console.error('Error parseando JSON de RPC buscar_postulante_pre_revision:', e);
+      // Combinar resultados de pre_revision_archivos con evidencia histórica de postulantes_examenes_anulados sin duplicar
+      const preMatches: any[] = [...preData];
+      annulledData.forEach(annRow => {
+          const annDni = String(annRow.NroDocumento || '').trim();
+          const annModId = String(annRow._modalidadId || '').trim();
+          const existing = preMatches.find(r => {
+              const rDni = String(r.NroDocumento || r.alumno || r.dni || r.DNI || r.CODPOSTULANTE || r.DOCUMENTO || '').trim();
+              const rModId = String(r._modalidadId || '').trim();
+              return rDni === annDni && ((annModId && rModId === annModId) || String(r._modalidadNombre || '').toUpperCase() === String(annRow._modalidadNombre || '').toUpperCase());
+          });
+          if (existing) {
+              if (!existing.examen_anulado && annRow.examen_anulado) {
+                  existing.examen_anulado = annRow.examen_anulado;
+              }
+          } else {
+              preMatches.push(annRow);
           }
-      }
+      });
 
       // 3. Assemble Unified Person Map
       const personMap = new Map<string, IntegratedStudentData>();
@@ -712,16 +1106,33 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
           }
           const profile = personMap.get(dni)!;
           profile.admissions.push(p);
+
+          // Enriquecer datos personales y de colegio desde participantes si existen
+          if (!profile.phone && p.telefono) profile.phone = String(p.telefono).trim();
+          if (!profile.email && p.email) profile.email = String(p.email).trim();
+          if (!profile.address && p.direccion) profile.address = String(p.direccion).trim();
+          if (!profile.currentUbigeo && p.ubigeo) profile.currentUbigeo = String(p.ubigeo).trim();
+          if (!profile.birthDate && p.fecha_nacimiento) profile.birthDate = String(p.fecha_nacimiento).trim();
+          if (!profile.gender && p.sexo) profile.gender = String(p.sexo).trim();
+          if (!profile.disability && p.discapacidad) profile.disability = String(p.discapacidad).trim();
+          if (p.colegio) {
+              const colStr = String(p.colegio).trim();
+              if (/^\d+$/.test(colStr)) {
+                  if (!profile.schoolCode) profile.schoolCode = colStr;
+              } else {
+                  if (!profile.schoolName) profile.schoolName = colStr;
+              }
+          }
       });
 
-      // Populate & Enrich from pre_revision_archivos
+      // Populate & Enrich from pre_revision_archivos & postulantes_examenes_anulados
       preMatches.forEach(r => {
           const dni = String(r.NroDocumento || r.alumno || r.dni || r.DNI || r.CODPOSTULANTE || r.DOCUMENTO || '').trim();
           if (!dni) return;
           
           const rawName = String(r.nombre || r.Nombre || r.NOMBRE || r.POSTULANTE || '').trim();
           const obs = String(r.OBSERVACION || r.observacion || r.Condicion || r.condicion || r.ESTADO || '').toUpperCase();
-          const isAdmittedInProcess = obs.includes('INGRESA') || obs.includes('INGRESO') || obs.includes('ADMITIDO') || obs === 'SI';
+          const isAdmittedInProcess = isApplicantAdmitted(obs, r);
 
           if (!personMap.has(dni)) {
               personMap.set(dni, {
@@ -741,6 +1152,9 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
           }
 
           const profile = personMap.get(dni)!;
+          if ((!profile.fullName || profile.fullName.startsWith('POSTULANTE DNI')) && rawName) {
+              profile.fullName = fixEncoding(rawName);
+          }
           if (isAdmittedInProcess) {
               profile.isIngresanteOficial = true;
               profile.isSoloPostulante = false;
@@ -813,59 +1227,239 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
       fetchProfileExtraInfo(candidate);
   };
 
+  const resolveCareerMetadata = (careerInput?: string, codeInput?: string, currentFilial?: string) => {
+    const cleanCareer = (careerInput || '').trim().toUpperCase();
+    const cleanCode = (codeInput || '').trim();
+
+    if (cleanCareer) {
+      const exactSchool = officialEscuelas.find(e => e.nombre === cleanCareer);
+      if (exactSchool) {
+        return {
+          CARRERA: exactSchool.nombre,
+          codigo_carrera: cleanCode || exactSchool.codigo_carrera || null,
+          FILIAL: (currentFilial || '').trim().toUpperCase() || exactSchool.filial || 'CUSCO'
+        };
+      }
+      const mapEntry = Object.entries(CAREER_CODE_MAP).find(([, name]) => name.toUpperCase() === cleanCareer);
+      if (mapEntry && !cleanCode) {
+        return {
+          CARRERA: cleanCareer,
+          codigo_carrera: mapEntry[0],
+          FILIAL: (currentFilial || '').trim().toUpperCase() || 'CUSCO'
+        };
+      }
+    } else if (cleanCode) {
+      const unpadded = cleanCode.replace(/^0+/, '');
+      const schoolByCode = officialEscuelas.find(
+        e => e.codigo_carrera === cleanCode || e.codigo_carrera.replace(/^0+/, '') === unpadded
+      );
+      if (schoolByCode) {
+        return {
+          CARRERA: schoolByCode.nombre,
+          codigo_carrera: schoolByCode.codigo_carrera,
+          FILIAL: (currentFilial || '').trim().toUpperCase() || schoolByCode.filial || 'CUSCO'
+        };
+      }
+      const mappedCareer = CAREER_CODE_MAP[unpadded] || CAREER_CODE_MAP[cleanCode];
+      if (mappedCareer) {
+        return {
+          CARRERA: mappedCareer,
+          codigo_carrera: cleanCode,
+          FILIAL: (currentFilial || '').trim().toUpperCase() || 'CUSCO'
+        };
+      }
+    }
+
+    return {
+      CARRERA: cleanCareer,
+      codigo_carrera: cleanCode || null,
+      FILIAL: (currentFilial || '').trim().toUpperCase() || 'CUSCO'
+    };
+  };
+
+  const buildParticipantPayload = (form: Partial<Participant>) => {
+    const toNullIfEmpty = (val: string | null | undefined) => {
+      const s = String(val ?? '').trim();
+      return s === '' ? null : s;
+    };
+    const resolved = resolveCareerMetadata(form.CARRERA, form.codigo_carrera || '', form.FILIAL);
+    return {
+      CODPOSTULANTE: String(form.CODPOSTULANTE || '').trim(),
+      NOMBRE: String(form.NOMBRE || '').trim().toUpperCase(),
+      CARRERA: resolved.CARRERA,
+      codigo_carrera: toNullIfEmpty(form.codigo_carrera ?? resolved.codigo_carrera),
+      FILIAL: resolved.FILIAL,
+      MODALIDAD: String(form.MODALIDAD || '').trim().toUpperCase(),
+      SEMESTRE: String(form.SEMESTRE || '').trim().toUpperCase(),
+      ANIO: String(form.ANIO || '').trim(),
+      NOTA: String(form.NOTA ?? '').trim(),
+      OMERITO: String(form.OMERITO ?? '').trim(),
+      FECHAINGRESO: String(form.FECHAINGRESO || '').trim(),
+      telefono: toNullIfEmpty(form.telefono),
+      email: toNullIfEmpty(form.email),
+      direccion: toNullIfEmpty(form.direccion),
+      colegio: toNullIfEmpty(form.colegio),
+      promedio_colegio: toNullIfEmpty(form.promedio_colegio),
+      ubigeo: toNullIfEmpty(form.ubigeo),
+      fecha_nacimiento: toNullIfEmpty(form.fecha_nacimiento),
+      sexo: toNullIfEmpty(form.sexo),
+      discapacidad: toNullIfEmpty(form.discapacidad),
+      nota_examen_anulado: toNullIfEmpty(form.nota_examen_anulado),
+      resolucion_anulacion: toNullIfEmpty(form.resolucion_anulacion),
+      fecha_examen_anulado: toNullIfEmpty(form.fecha_examen_anulado)
+    };
+  };
+
+  const openEditRecordModal = (record: Participant) => {
+    setEditingRecord(record);
+    setEditForm({ ...record });
+    setParticipantWizardStep(1);
+    setShowSyncNameOption(false);
+    setSyncNameChecked(false);
+    setModalError(null);
+    setDuplicateExistingRecord(null);
+    setShowContingencySection(
+      Boolean(record.nota_examen_anulado || record.resolucion_anulacion || record.fecha_examen_anulado)
+    );
+    setIsEditing(true);
+  };
+
+  const openAddParticipantModal = (prefillFromProfile: boolean = true, timelineHint?: TimelineItem) => {
+    setParticipantWizardStep(1);
+    setModalError(null);
+    setDuplicateExistingRecord(null);
+    setShowContingencySection(false);
+
+    if (prefillFromProfile && selectedProfile) {
+      const latestApp = timelineHint?.rawApp || selectedProfile.applications[0];
+      const hintCareer = timelineHint?.carrera && timelineHint.carrera !== timelineHint.modalidad
+        ? timelineHint.carrera
+        : fixCareerName(latestApp?.carreraIngreso || latestApp?.carrera1 || '');
+      const hintModality = timelineHint?.modalidad || latestApp?.modalidad || '';
+      const hintYear = timelineHint?.anio ? String(timelineHint.anio) : (hintModality.match(/\b(20\d\d)\b/)?.[1] || new Date().getFullYear().toString());
+      const rawSem = timelineHint?.semestre ? String(timelineHint.semestre) : '';
+      const hintSem = rawSem
+        ? (rawSem.includes('20') ? rawSem : (hintYear && (rawSem === 'I' || rawSem === 'II') ? `${hintYear}-${rawSem}` : rawSem))
+        : '';
+      const resolvedMeta = resolveCareerMetadata(hintCareer, '', timelineHint?.sede || 'CUSCO');
+
+      setNewStudentForm({
+        CODPOSTULANTE: selectedProfile.dni || '',
+        NOMBRE: selectedProfile.fullName || '',
+        ANIO: hintYear === 'Histórico' ? '' : hintYear,
+        SEMESTRE: hintSem,
+        MODALIDAD: hintModality.toUpperCase(),
+        CARRERA: resolvedMeta.CARRERA,
+        codigo_carrera: resolvedMeta.codigo_carrera || '',
+        FILIAL: resolvedMeta.FILIAL || 'CUSCO',
+        NOTA: timelineHint?.puntaje ? String(timelineHint.puntaje) : (latestApp?.nota || ''),
+        OMERITO: timelineHint?.puesto ? String(timelineHint.puesto) : (latestApp?.puesto || ''),
+        FECHAINGRESO: timelineHint?.fecha || '',
+        telefono: selectedProfile.phone || '',
+        email: selectedProfile.email || '',
+        direccion: selectedProfile.address || '',
+        ubigeo: selectedProfile.currentUbigeo || '',
+        fecha_nacimiento: selectedProfile.birthDate || '',
+        sexo: selectedProfile.gender || '',
+        discapacidad: selectedProfile.disability || 'Ninguna',
+        colegio: selectedProfile.schoolCode || selectedProfile.schoolInfo?.nombre_ie || selectedProfile.schoolName || '',
+        promedio_colegio: ''
+      });
+    } else {
+      setNewStudentForm({
+        FILIAL: 'CUSCO',
+        ANIO: new Date().getFullYear().toString(),
+        discapacidad: 'Ninguna'
+      });
+    }
+    setIsAddingNew(true);
+  };
+
+  const applyProfilePersonalDataToForm = (
+    currentForm: Partial<Participant>,
+    setter: React.Dispatch<React.SetStateAction<Partial<Participant>>>
+  ) => {
+    if (!selectedProfile) return;
+    setter({
+      ...currentForm,
+      telefono: currentForm.telefono || selectedProfile.phone || '',
+      email: currentForm.email || selectedProfile.email || '',
+      direccion: currentForm.direccion || selectedProfile.address || '',
+      ubigeo: currentForm.ubigeo || selectedProfile.currentUbigeo || '',
+      fecha_nacimiento: currentForm.fecha_nacimiento || selectedProfile.birthDate || '',
+      sexo: currentForm.sexo || selectedProfile.gender || '',
+      discapacidad: currentForm.discapacidad || selectedProfile.disability || 'Ninguna',
+      colegio: currentForm.colegio || selectedProfile.schoolCode || selectedProfile.schoolInfo?.nombre_ie || selectedProfile.schoolName || ''
+    });
+    notifyUser('Datos personales y de colegio completados desde el expediente.', 'info');
+  };
+
   const handleUpdateRecord = async (syncName: boolean = false) => {
-    if (!editingRecord || !editForm.NOMBRE?.trim() || !selectedProfile) return;
+    if (!editingRecord) return;
+    if (!editForm.CODPOSTULANTE?.trim() || !editForm.NOMBRE?.trim()) {
+      setModalError('El Código / DNI y el Nombre Completo son obligatorios.');
+      return;
+    }
+    setModalError(null);
     setLoading(true);
     try {
-      const { error } = await supabase
+      const payload = buildParticipantPayload(editForm);
+
+      const { data: updatedRow, error } = await supabase
         .from('participantes')
-        .update({
-          NOMBRE: editForm.NOMBRE.toUpperCase(),
-          ANIO: editForm.ANIO,
-          OMERITO: editForm.OMERITO,
-          FECHAINGRESO: editForm.FECHAINGRESO,
-          CODPOSTULANTE: editForm.CODPOSTULANTE,
-          CARRERA: editForm.CARRERA?.toUpperCase(),
-          FILIAL: editForm.FILIAL?.toUpperCase(),
-          MODALIDAD: editForm.MODALIDAD?.toUpperCase(),
-          SEMESTRE: editForm.SEMESTRE,
-          NOTA: editForm.NOTA
-        })
-        .eq('id', editingRecord.id);
+        .update(payload)
+        .eq('id', editingRecord.id)
+        .select('*')
+        .single();
       
       if (error) throw error;
 
-      if (syncName && editingRecord.NOMBRE !== editForm.NOMBRE.toUpperCase()) {
-          await supabase
-            .from('participantes')
-            .update({ NOMBRE: editForm.NOMBRE.toUpperCase() })
-            .eq('NOMBRE', editingRecord.NOMBRE);
+      if (syncName && editingRecord.NOMBRE !== payload.NOMBRE) {
+        await supabase
+          .from('participantes')
+          .update({ NOMBRE: payload.NOMBRE })
+          .eq('CODPOSTULANTE', payload.CODPOSTULANTE);
       }
       
-      // Update state
+      const savedParticipant = (updatedRow || { ...editingRecord, ...payload }) as Participant;
+
+      // Update state immediately including personal/contact preview
       setSelectedProfile(prev => {
-          if (!prev) return prev;
-          const updatedAdms = prev.admissions.map(s => {
-              if (syncName && s.NOMBRE === editingRecord.NOMBRE) {
-                  return { ...s, ...editForm, NOMBRE: editForm.NOMBRE!.toUpperCase() } as Participant;
-              }
-              if (s.id === editingRecord.id) {
-                  return { ...s, ...editForm, NOMBRE: editForm.NOMBRE!.toUpperCase() } as Participant;
-              }
-              return s;
-          });
-          return {
-              ...prev,
-              fullName: syncName ? editForm.NOMBRE!.toUpperCase() : prev.fullName,
-              admissions: updatedAdms
-          };
+        if (!prev) return prev;
+        const updatedAdms = prev.admissions.map(s => {
+          if (s.id === editingRecord.id) {
+            return savedParticipant;
+          }
+          if (syncName && s.CODPOSTULANTE === payload.CODPOSTULANTE) {
+            return { ...s, NOMBRE: payload.NOMBRE } as Participant;
+          }
+          return s;
+        });
+        return {
+          ...prev,
+          dni: payload.CODPOSTULANTE || prev.dni,
+          fullName: (syncName || prev.admissions.length <= 1) ? payload.NOMBRE : prev.fullName,
+          phone: payload.telefono || prev.phone,
+          email: payload.email || prev.email,
+          address: payload.direccion || prev.address,
+          currentUbigeo: payload.ubigeo || prev.currentUbigeo,
+          birthDate: payload.fecha_nacimiento || prev.birthDate,
+          gender: payload.sexo || prev.gender,
+          disability: payload.discapacidad || prev.disability,
+          schoolCode: payload.colegio && /^\d+$/.test(payload.colegio) ? payload.colegio : prev.schoolCode,
+          schoolName: payload.colegio && !/^\d+$/.test(payload.colegio) ? payload.colegio : prev.schoolName,
+          admissions: updatedAdms
+        };
       });
       
       setIsEditing(false);
       setEditingRecord(null);
       setShowSyncNameOption(false);
+      setSyncNameChecked(false);
+      notifyUser('Registro de ingresante actualizado correctamente en participantes.', 'success');
     } catch (err: any) {
-      alert('Error al actualizar: ' + err.message);
+      setModalError('Error al actualizar en participantes: ' + (err.message || 'Error desconocido'));
+      notifyUser('Error al actualizar: ' + (err.message || 'Error desconocido'), 'error');
     } finally {
       setLoading(false);
     }
@@ -873,35 +1467,54 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
 
   const handleCreateStudent = async () => {
     if (!newStudentForm.NOMBRE?.trim() || !newStudentForm.CODPOSTULANTE?.trim()) {
-       alert("DNI y Nombres son obligatorios");
-       return;
+      setModalError('El Código / DNI y el Nombre Completo son campos obligatorios.');
+      return;
     }
+    if (!newStudentForm.CARRERA?.trim() || !newStudentForm.MODALIDAD?.trim()) {
+      setModalError('La Modalidad Oficial y la Escuela Profesional / Carrera son obligatorias para el padrón de ingresantes.');
+      return;
+    }
+
+    setModalError(null);
+    setDuplicateExistingRecord(null);
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('participantes').insert([{
-          ...newStudentForm,
-          NOMBRE: newStudentForm.NOMBRE.toUpperCase(),
-          CODPOSTULANTE: newStudentForm.CODPOSTULANTE,
-          CARRERA: newStudentForm.CARRERA?.toUpperCase() || '',
-          MODALIDAD: newStudentForm.MODALIDAD?.toUpperCase() || '',
-          FILIAL: newStudentForm.FILIAL?.toUpperCase() || 'CUSCO',
-          ANIO: newStudentForm.ANIO || '',
-          SEMESTRE: newStudentForm.SEMESTRE || '',
-          NOTA: newStudentForm.NOTA || '',
-          OMERITO: newStudentForm.OMERITO || '',
-          FECHAINGRESO: newStudentForm.FECHAINGRESO || ''
-      }]).select('*').single();
+      const payload = buildParticipantPayload(newStudentForm);
+
+      // Protección AGENTS.md Regla 3: 1 fila oficial por proceso de admisión para cada ingresante
+      let dupQuery = supabase
+        .from('participantes')
+        .select('*')
+        .eq('CODPOSTULANTE', payload.CODPOSTULANTE)
+        .eq('MODALIDAD', payload.MODALIDAD);
+      if (payload.ANIO) dupQuery = dupQuery.eq('ANIO', payload.ANIO);
+      if (payload.SEMESTRE) dupQuery = dupQuery.eq('SEMESTRE', payload.SEMESTRE);
+
+      const { data: existingRows } = await dupQuery.limit(1);
+      if (existingRows && existingRows.length > 0) {
+        setDuplicateExistingRecord(existingRows[0] as Participant);
+        setModalError(
+          `Este ingresante (DNI ${payload.CODPOSTULANTE}) ya cuenta con un registro oficial en participantes para el proceso ${payload.MODALIDAD} (${payload.SEMESTRE || payload.ANIO}). Según las directivas de auditoría, no se deben duplicar filas en un mismo proceso.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('participantes')
+        .insert([payload])
+        .select('*')
+        .single();
       if (error) throw error;
       
-      alert('Estudiante agregado con éxito');
+      notifyUser('Ingresante registrado con éxito en la tabla oficial participantes.', 'success');
       setIsAddingNew(false);
       setNewStudentForm({});
       setSearchQuery(data.CODPOSTULANTE);
-      setTimeout(() => {
-          handleSearch();
-      }, 100);
+      await handleSearch(data.CODPOSTULANTE);
     } catch (err: any) {
-      alert('Error al agregar estudiante: ' + err.message);
+      setModalError('Error al registrar en participantes: ' + (err.message || 'Error desconocido'));
+      notifyUser('Error al agregar ingresante: ' + (err.message || 'Error desconocido'), 'error');
     } finally {
       setLoading(false);
     }
@@ -1321,7 +1934,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
 
           // SI NO EXISTE UN EVENTO EN ESTE PROCESO:
           const obs = String(app.condicion || app.rawRow?.OBSERVACION || app.rawRow?.ESTADO || '').toUpperCase();
-          const isIngresante = obs.includes('INGRESA') || obs.includes('ADMITIDO') || (app.rawRow && (app.rawRow.Ingresante === 1 || app.rawRow.Ingresante === '1'));
+          const isIngresante = isApplicantAdmitted(obs, app.rawRow);
 
           let extractedAnio = String(app.rawRow?._anio || app.rawRow?.anio || app.rawRow?.Anio || '').trim();
           if (!extractedAnio) {
@@ -1500,197 +2113,835 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
   return (
     <div className="flex-1 w-full max-w-[1600px] mx-auto p-4 md:p-6 lg:p-8 flex flex-col gap-6 h-full overflow-hidden">
       
-      {/* MODAL DE EDICIÓN DE REGISTRO OFICIAL */}
-      {isEditing && editingRecord && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
-                  <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
-                      <div className="flex items-center gap-4">
-                          <div className="size-12 bg-primary text-white rounded-2xl flex items-center justify-center">
-                              <span className="material-symbols-outlined">edit</span>
-                          </div>
-                          <div>
-                              <h3 className="text-xl font-black text-slate-900 uppercase">Editar Registro de Ingreso</h3>
-                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">ID: {editingRecord.id}</p>
-                          </div>
-                      </div>
-                      <button 
-                        onClick={() => { setIsEditing(false); setEditingRecord(null); setShowSyncNameOption(false); }}
-                        className="size-10 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center transition-colors"
-                      >
-                          <span className="material-symbols-outlined">close</span>
-                      </button>
-                  </div>
-                  <div className="p-8 overflow-y-auto max-h-[70vh]">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="md:col-span-2">
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombre Completo (Pivot)</label>
-                              <input 
-                                  value={editForm.NOMBRE || ''} 
-                                  onChange={e => {
-                                      setEditForm({...editForm, NOMBRE: e.target.value});
-                                      setShowSyncNameOption(e.target.value.toUpperCase() !== editingRecord.NOMBRE);
-                                  }} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1 uppercase"
-                              />
-                          </div>
-                          {showSyncNameOption && (
-                              <div className="md:col-span-2 bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-center gap-3">
-                                  <span className="material-symbols-outlined text-amber-600">info</span>
-                                  <p className="text-xs font-bold text-amber-800">Has modificado el nombre. ¿Deseas sincronizarlo en sus demás registros?</p>
-                              </div>
-                          )}
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Año de Proceso</label>
-                              <input 
-                                  value={editForm.ANIO || ''} 
-                                  onChange={e => setEditForm({...editForm, ANIO: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Orden Mérito</label>
-                              <input 
-                                  value={editForm.OMERITO || ''} 
-                                  onChange={e => setEditForm({...editForm, OMERITO: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Fecha de Ingreso</label>
-                              <input 
-                                  value={editForm.FECHAINGRESO || ''} 
-                                  onChange={e => setEditForm({...editForm, FECHAINGRESO: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                                  placeholder="DD/MM/AAAA"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Código / DNI</label>
-                              <input 
-                                  value={editForm.CODPOSTULANTE || ''} 
-                                  onChange={e => setEditForm({...editForm, CODPOSTULANTE: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Carrera</label>
-                              <input 
-                                  value={editForm.CARRERA || ''} 
-                                  onChange={e => setEditForm({...editForm, CARRERA: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1 uppercase"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Semestre</label>
-                              <input 
-                                  value={editForm.SEMESTRE || ''} 
-                                  onChange={e => setEditForm({...editForm, SEMESTRE: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                      </div>
-                  </div>
-                  <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-wrap justify-end gap-3">
-                       <button onClick={() => { setIsEditing(false); setEditingRecord(null); setShowSyncNameOption(false); }} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all">Cancelar</button>
-                       <button 
-                        onClick={() => handleUpdateRecord(showSyncNameOption)} 
-                        disabled={loading}
-                        className="px-10 py-3 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
-                       >
-                           {loading ? 'Guardando...' : 'Guardar Cambios'}
-                       </button>
-                  </div>
-              </div>
-          </div>
-      )}
+      {/* DATALISTS DE CATÁLOGOS OFICIALES (AGENTS.md Regla 1) */}
+      <datalist id="official-modalidades-list">
+        {officialModalidades.map((mod, idx) => (
+          <option key={idx} value={mod} />
+        ))}
+      </datalist>
+      <datalist id="official-carreras-list">
+        {Array.from(
+          new Set([
+            ...officialEscuelas.map(e => e.nombre),
+            ...Object.values(CAREER_CODE_MAP)
+          ])
+        )
+          .sort()
+          .map((car, idx) => (
+            <option key={idx} value={car} />
+          ))}
+      </datalist>
+      <datalist id="official-filiales-list">
+        {Array.from(
+          new Set([
+            'CUSCO',
+            'ANDAHUAYLAS',
+            'SICUANI',
+            'ESPINAR',
+            'SANTO TOMAS',
+            'PUERTO MALDONADO',
+            'QUILLABAMBA',
+            'CURAHUASI',
+            'VILCABAMBA',
+            'CANAS',
+            ...officialEscuelas.map(e => e.filial).filter(Boolean)
+          ])
+        ).map((fil, idx) => (
+          <option key={idx} value={fil} />
+        ))}
+      </datalist>
+      <datalist id="official-semestres-list">
+        {['2026-I', '2026-II', '2025-I', '2025-II', '2024-I', '2024-II', '2023-I', '2023-II', '2022-I', '2022-II', 'I', 'II'].map((sem, idx) => (
+          <option key={idx} value={sem} />
+        ))}
+      </datalist>
+      <datalist id="official-discapacidad-list">
+        {['Ninguna', 'Física / Motora', 'Visual', 'Auditiva', 'Intelectual', 'CONADIS'].map((d, idx) => (
+          <option key={idx} value={d} />
+        ))}
+      </datalist>
 
-      {/* MODAL DE AGREGAR ESTUDIANTE */}
-      {isAddingNew && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
-                  <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
-                      <div className="flex items-center gap-4">
-                          <div className="size-12 bg-primary text-white rounded-2xl flex items-center justify-center">
-                              <span className="material-symbols-outlined">person_add</span>
-                          </div>
-                          <div>
-                              <h3 className="text-xl font-black text-slate-900 uppercase">Agregar Nuevo Ingresante</h3>
-                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">REGISTRAR NUEVO INGRESO</p>
-                          </div>
-                      </div>
-                      <button 
-                        onClick={() => { setIsAddingNew(false); setNewStudentForm({}); }}
-                        className="size-10 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center transition-colors"
-                      >
-                          <span className="material-symbols-outlined">close</span>
-                      </button>
+      {/* MODAL POR PASOS (WIZARD) DE EDICIÓN / REGISTRO EN TABLA PARTICIPANTES */}
+      {((isEditing && editingRecord) || isAddingNew) && (() => {
+        const isEditMode = Boolean(isEditing && editingRecord);
+        const currentForm = isEditMode ? editForm : newStudentForm;
+        const updateCurrentForm = (patch: Partial<Participant>) => {
+          if (modalError) setModalError(null);
+          if (isEditMode) {
+            setEditForm(prev => ({ ...prev, ...patch }));
+          } else {
+            setNewStudentForm(prev => ({ ...prev, ...patch }));
+          }
+        };
+        const closeParticipantModal = () => {
+          setIsEditing(false);
+          setEditingRecord(null);
+          setShowSyncNameOption(false);
+          setSyncNameChecked(false);
+          setIsAddingNew(false);
+          setNewStudentForm({});
+          setParticipantWizardStep(1);
+          setModalError(null);
+          setDuplicateExistingRecord(null);
+        };
+
+        const wizardSteps: Array<{ step: 1 | 2 | 3 | 4; shortTitle: string; title: string; subtitle: string; icon: string }> = [
+          {
+            step: 1,
+            shortTitle: 'Identificación',
+            title: 'Identificación y Proceso',
+            subtitle: 'Datos básicos del estudiante y proceso de admisión al que corresponde.',
+            icon: 'badge'
+          },
+          {
+            step: 2,
+            shortTitle: 'Carrera y Nota',
+            title: 'Carrera, Sede y Resultados',
+            subtitle: 'Escuela profesional adjudicada, filial, puntaje oficial y orden de mérito.',
+            icon: 'school'
+          },
+          {
+            step: 3,
+            shortTitle: 'Contacto',
+            title: 'Contacto y Datos Personales',
+            subtitle: ' Medios de comunicación, domicilio actual y datos demográficos.',
+            icon: 'contact_phone'
+          },
+          {
+            step: 4,
+            shortTitle: 'Colegio y Cierre',
+            title: 'Colegio y Confirmación Final',
+            subtitle: 'Procedencia escolar, contingencias opcionales y resumen previo al guardado.',
+            icon: 'fact_check'
+          }
+        ];
+
+        const validateBeforeStep = (targetStep: 1 | 2 | 3 | 4): boolean => {
+          if (targetStep > 1) {
+            if (!currentForm.CODPOSTULANTE?.trim() || !currentForm.NOMBRE?.trim()) {
+              setModalError('Complete el Código / DNI y los Apellidos y Nombres antes de continuar.');
+              return false;
+            }
+            if (!isEditMode && !currentForm.MODALIDAD?.trim()) {
+              setModalError('Indique la Modalidad Oficial del proceso antes de pasar al siguiente paso.');
+              return false;
+            }
+          }
+          if (targetStep > 2 && !isEditMode && !currentForm.CARRERA?.trim()) {
+            setModalError('Seleccione o escriba la Escuela Profesional / Carrera antes de continuar.');
+            return false;
+          }
+          setModalError(null);
+          return true;
+        };
+
+        const handleGoToStep = (targetStep: 1 | 2 | 3 | 4) => {
+          if (targetStep <= participantWizardStep || validateBeforeStep(targetStep)) {
+            setParticipantWizardStep(targetStep);
+          }
+        };
+
+        const handleNextStep = () => {
+          if (participantWizardStep < 4) {
+            const next = (participantWizardStep + 1) as 1 | 2 | 3 | 4;
+            if (validateBeforeStep(next)) {
+              setParticipantWizardStep(next);
+            }
+          }
+        };
+
+        const handlePrevStep = () => {
+          if (participantWizardStep > 1) {
+            setModalError(null);
+            setParticipantWizardStep((participantWizardStep - 1) as 1 | 2 | 3 | 4);
+          }
+        };
+
+        const handleModalityChange = (val: string) => {
+          const upper = val.toUpperCase();
+          const patch: Partial<Participant> = { MODALIDAD: val };
+          const yMatch = upper.match(/\b(20\d\d|19\d\d)\b/);
+          if (yMatch && !currentForm.ANIO) {
+            patch.ANIO = yMatch[1];
+          }
+          if (!currentForm.SEMESTRE && yMatch) {
+            if (upper.includes(`${yMatch[1]}-II`) || /\bII\b/.test(upper)) {
+              patch.SEMESTRE = `${yMatch[1]}-II`;
+            } else if (upper.includes(`${yMatch[1]}-I`) || upper.includes('PRIMERA OPORTUNIDAD') || upper.includes('EXONERACIÓN') || upper.includes('EXONERACION')) {
+              patch.SEMESTRE = `${yMatch[1]}-I`;
+            }
+          }
+          updateCurrentForm(patch);
+        };
+
+        const handleCareerChange = (val: string) => {
+          const clean = val.trim().toUpperCase();
+          const matchedEsc = officialEscuelas.find(e => e.nombre === clean);
+          if (matchedEsc) {
+            updateCurrentForm({
+              CARRERA: val,
+              codigo_carrera: matchedEsc.codigo_carrera || currentForm.codigo_carrera || '',
+              FILIAL: matchedEsc.filial || currentForm.FILIAL || 'CUSCO'
+            });
+            return;
+          }
+          const mapMatch = Object.entries(CAREER_CODE_MAP).find(([, name]) => name.toUpperCase() === clean);
+          if (mapMatch) {
+            updateCurrentForm({
+              CARRERA: val,
+              codigo_carrera: currentForm.codigo_carrera || mapMatch[0]
+            });
+            return;
+          }
+          updateCurrentForm({ CARRERA: val });
+        };
+
+        const handleCareerCodeChange = (val: string) => {
+          const cleanCode = val.trim();
+          const unpadded = cleanCode.replace(/^0+/, '');
+          const matchedEsc = officialEscuelas.find(
+            e => e.codigo_carrera === cleanCode || (unpadded && e.codigo_carrera.replace(/^0+/, '') === unpadded)
+          );
+          if (matchedEsc && !currentForm.CARRERA?.trim()) {
+            updateCurrentForm({
+              codigo_carrera: val,
+              CARRERA: matchedEsc.nombre,
+              FILIAL: matchedEsc.filial || currentForm.FILIAL || 'CUSCO'
+            });
+            return;
+          }
+          const mappedName = CAREER_CODE_MAP[unpadded] || CAREER_CODE_MAP[cleanCode];
+          if (mappedName && !currentForm.CARRERA?.trim()) {
+            updateCurrentForm({
+              codigo_carrera: val,
+              CARRERA: mappedName
+            });
+            return;
+          }
+          updateCurrentForm({ codigo_carrera: val });
+        };
+
+        const canAutofillFromProfile = Boolean(
+          selectedProfile &&
+          (!currentForm.CODPOSTULANTE || currentForm.CODPOSTULANTE.trim() === selectedProfile.dni) &&
+          (selectedProfile.phone || selectedProfile.email || selectedProfile.address || selectedProfile.schoolCode || selectedProfile.schoolName || selectedProfile.birthDate)
+        );
+
+        const activeStepMeta = wizardSteps[participantWizardStep - 1];
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden animate-in zoom-in-95 border border-slate-200">
+              {/* Header fijo */}
+              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <div className={`size-11 rounded-2xl flex items-center justify-center text-white shrink-0 shadow-sm ${isEditMode ? 'bg-primary' : 'bg-emerald-600'}`}>
+                    <span className="material-symbols-outlined text-[22px]">{isEditMode ? 'edit_square' : 'person_add'}</span>
                   </div>
-                  <div className="p-8 overflow-y-auto max-h-[70vh]">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="md:col-span-2">
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombre Completo *</label>
-                              <input 
-                                  value={newStudentForm.NOMBRE || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, NOMBRE: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1 uppercase"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Código / DNI *</label>
-                              <input 
-                                  value={newStudentForm.CODPOSTULANTE || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, CODPOSTULANTE: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Año de Proceso</label>
-                              <input 
-                                  value={newStudentForm.ANIO || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, ANIO: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Semestre</label>
-                              <input 
-                                  value={newStudentForm.SEMESTRE || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, SEMESTRE: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Modalidad</label>
-                              <input 
-                                  value={newStudentForm.MODALIDAD || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, MODALIDAD: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1 uppercase"
-                              />
-                          </div>
-                          <div>
-                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Carrera</label>
-                              <input 
-                                  value={newStudentForm.CARRERA || ''} 
-                                  onChange={e => setNewStudentForm({...newStudentForm, CARRERA: e.target.value})} 
-                                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-100 bg-slate-50 outline-none font-bold focus:border-primary focus:bg-white transition-all mt-1 uppercase"
-                              />
-                          </div>
-                      </div>
+                  <div className="min-w-0">
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase truncate">
+                      {isEditMode ? 'Editar Ingresante Oficial' : 'Nuevo Ingresante Oficial'}
+                    </h3>
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider truncate">
+                      {currentForm.NOMBRE ? `${currentForm.NOMBRE.toUpperCase()}${currentForm.CODPOSTULANTE ? ` • DNI ${currentForm.CODPOSTULANTE}` : ''}` : 'Tabla oficial: participantes'}
+                    </p>
                   </div>
-                  <div className="p-6 bg-slate-50 border-t border-slate-200 flex flex-wrap justify-end gap-3">
-                       <button onClick={() => { setIsAddingNew(false); setNewStudentForm({}); }} className="px-6 py-3 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all">Cancelar</button>
-                       <button 
-                        onClick={handleCreateStudent} 
-                        disabled={loading}
-                        className="px-10 py-3 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-primary/20 disabled:opacity-50"
-                       >
-                           {loading ? 'Guardando...' : 'Agregar Estudiante'}
-                       </button>
-                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!isEditMode && selectedProfile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewStudentForm({ FILIAL: 'CUSCO', ANIO: new Date().getFullYear().toString(), discapacidad: 'Ninguna' });
+                        setParticipantWizardStep(1);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider bg-slate-200/70 hover:bg-slate-200 text-slate-600 transition-colors"
+                      title="Limpiar formulario para registrar una persona distinta"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={closeParticipantModal}
+                    className="size-9 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors"
+                  >
+                    <span className="material-symbols-outlined">close</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Barra de Pasos (Stepper) */}
+              <div className="px-6 py-3.5 bg-white border-b border-slate-100 shrink-0">
+                <div className="grid grid-cols-4 gap-2">
+                  {wizardSteps.map((s) => {
+                    const isActive = participantWizardStep === s.step;
+                    const isCompleted = participantWizardStep > s.step;
+                    return (
+                      <button
+                        key={s.step}
+                        type="button"
+                        onClick={() => handleGoToStep(s.step)}
+                        className={`flex flex-col items-center sm:items-start p-2 rounded-xl border text-left transition-all ${
+                          isActive
+                            ? isEditMode
+                              ? 'bg-primary/5 border-primary/40 text-primary shadow-2xs'
+                              : 'bg-emerald-50 border-emerald-300 text-emerald-800 shadow-2xs'
+                            : isCompleted
+                              ? 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                              : 'bg-white border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 w-full justify-center sm:justify-start">
+                          <span className={`size-5 rounded-full text-[10px] font-black flex items-center justify-center shrink-0 ${
+                            isActive
+                              ? isEditMode ? 'bg-primary text-white' : 'bg-emerald-600 text-white'
+                              : isCompleted
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {isCompleted ? '✓' : s.step}
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-tight truncate hidden sm:inline">
+                            {s.shortTitle}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Cuerpo compacto por paso */}
+              <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
+                {/* Encabezado del paso activo */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="size-9 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-[20px]">{activeStepMeta.icon}</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-tight">
+                        Paso {participantWizardStep}: {activeStepMeta.title}
+                      </h4>
+                      <p className="text-xs text-slate-500">{activeStepMeta.subtitle}</p>
+                    </div>
+                  </div>
+                  {participantWizardStep === 3 && canAutofillFromProfile && (
+                    <button
+                      type="button"
+                      onClick={() => applyProfilePersonalDataToForm(currentForm, isEditMode ? setEditForm : setNewStudentForm)}
+                      className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">auto_fix_high</span>
+                      Tomar datos de ficha
+                    </button>
+                  )}
+                </div>
+
+                {modalError && (
+                  <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 flex flex-col gap-2">
+                    <div className="flex items-start gap-2">
+                      <span className="material-symbols-outlined text-red-600 text-[18px] shrink-0 mt-0.5">warning</span>
+                      <p className="text-xs font-bold text-red-800 leading-relaxed">{modalError}</p>
+                    </div>
+                    {duplicateExistingRecord && (
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingNew(false);
+                            openEditRecordModal(duplicateExistingRecord);
+                          }}
+                          className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">edit</span>
+                          Editar Registro Existente
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* PASO 1: IDENTIFICACIÓN Y PROCESO */}
+                {participantWizardStep === 1 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 animate-in fade-in duration-150">
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Código / DNI *
+                      </label>
+                      <input
+                        autoFocus
+                        value={currentForm.CODPOSTULANTE || ''}
+                        onChange={e => updateCurrentForm({ CODPOSTULANTE: e.target.value })}
+                        placeholder="Ej. 74125896"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-8">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Apellidos y Nombres Completos *
+                      </label>
+                      <input
+                        value={currentForm.NOMBRE || ''}
+                        onChange={e => {
+                          const val = e.target.value;
+                          updateCurrentForm({ NOMBRE: val });
+                          if (isEditMode && editingRecord) {
+                            const changed = val.trim().toUpperCase() !== (editingRecord.NOMBRE || '').trim().toUpperCase();
+                            setShowSyncNameOption(changed);
+                            if (!changed) setSyncNameChecked(false);
+                          }
+                        }}
+                        placeholder="APELLIDO PATERNO APELLIDO MATERNO NOMBRES"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                    </div>
+
+                    {isEditMode && showSyncNameOption && (
+                      <div className="sm:col-span-12 bg-amber-50 border border-amber-200 p-3 rounded-xl">
+                        <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={syncNameChecked}
+                            onChange={e => setSyncNameChecked(e.target.checked)}
+                            className="size-4 rounded border-amber-400 text-primary focus:ring-primary"
+                          />
+                          <span>Sincronizar este nombre corregido en sus demás ingresos con el mismo DNI</span>
+                        </label>
+                      </div>
+                    )}
+
+                    <div className="sm:col-span-12">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Modalidad Oficial {!isEditMode && '*'}
+                      </label>
+                      <input
+                        list="official-modalidades-list"
+                        value={currentForm.MODALIDAD || ''}
+                        onChange={e => handleModalityChange(e.target.value)}
+                        placeholder="Ej. CONCURSO DE ADMISIÓN ORDINARIO 2026-I"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1 ml-1">
+                        Escriba para filtrar del catálogo oficial del Cuadro de Vacantes.
+                      </p>
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Año de Proceso
+                      </label>
+                      <input
+                        value={currentForm.ANIO || ''}
+                        onChange={e => updateCurrentForm({ ANIO: e.target.value })}
+                        placeholder="Ej. 2026"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Semestre de Ingreso
+                      </label>
+                      <input
+                        list="official-semestres-list"
+                        value={currentForm.SEMESTRE || ''}
+                        onChange={e => updateCurrentForm({ SEMESTRE: e.target.value.toUpperCase() })}
+                        placeholder="Ej. 2026-I"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* PASO 2: CARRERA, SEDE Y RESULTADOS */}
+                {participantWizardStep === 2 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 animate-in fade-in duration-150">
+                    <div className="sm:col-span-9">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Escuela Profesional / Carrera {!isEditMode && '*'}
+                      </label>
+                      <input
+                        autoFocus
+                        list="official-carreras-list"
+                        value={currentForm.CARRERA || ''}
+                        onChange={e => handleCareerChange(e.target.value)}
+                        placeholder="Ej. MEDICINA HUMANA"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-3">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Código Carrera
+                      </label>
+                      <input
+                        value={currentForm.codigo_carrera || ''}
+                        onChange={e => handleCareerCodeChange(e.target.value)}
+                        placeholder="Ej. 205"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Sede / Filial
+                      </label>
+                      <input
+                        list="official-filiales-list"
+                        value={currentForm.FILIAL || ''}
+                        onChange={e => updateCurrentForm({ FILIAL: e.target.value.toUpperCase() })}
+                        placeholder="CUSCO"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                          Fecha de Ingreso
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => updateCurrentForm({ FECHAINGRESO: new Date().toISOString().slice(0, 10) })}
+                          className="text-[10px] font-black text-primary hover:underline uppercase mr-1"
+                        >
+                          Usar Hoy
+                        </button>
+                      </div>
+                      <input
+                        value={currentForm.FECHAINGRESO || ''}
+                        onChange={e => updateCurrentForm({ FECHAINGRESO: e.target.value })}
+                        placeholder="AAAA-MM-DD o DD/MM/AAAA"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Puntaje / Nota Oficial
+                      </label>
+                      <input
+                        value={currentForm.NOTA || ''}
+                        onChange={e => updateCurrentForm({ NOTA: e.target.value })}
+                        placeholder="Ej. 15.450"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-6">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Orden de Mérito (Puesto)
+                      </label>
+                      <input
+                        value={currentForm.OMERITO || ''}
+                        onChange={e => updateCurrentForm({ OMERITO: e.target.value })}
+                        placeholder="Ej. 1"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* PASO 3: CONTACTO Y DATOS PERSONALES */}
+                {participantWizardStep === 3 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 animate-in fade-in duration-150">
+                    <div className="sm:col-span-5">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Teléfono / Celular
+                      </label>
+                      <input
+                        autoFocus
+                        value={currentForm.telefono || ''}
+                        onChange={e => updateCurrentForm({ telefono: e.target.value })}
+                        placeholder="Ej. 984123456"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-7">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Correo Electrónico
+                      </label>
+                      <input
+                        type="email"
+                        value={currentForm.email || ''}
+                        onChange={e => updateCurrentForm({ email: e.target.value })}
+                        placeholder="correo@ejemplo.com"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Fecha de Nacimiento
+                      </label>
+                      <input
+                        value={currentForm.fecha_nacimiento || ''}
+                        onChange={e => updateCurrentForm({ fecha_nacimiento: e.target.value })}
+                        placeholder="AAAA-MM-DD"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Sexo / Género
+                      </label>
+                      <select
+                        value={currentForm.sexo || ''}
+                        onChange={e => updateCurrentForm({ sexo: e.target.value })}
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1"
+                      >
+                        <option value="">-- Seleccionar --</option>
+                        <option value="Masculino">Masculino</option>
+                        <option value="Femenino">Femenino</option>
+                        <option value="No especificado">No especificado</option>
+                        {currentForm.sexo && !['Masculino', 'Femenino', 'No especificado'].includes(currentForm.sexo) && (
+                          <option value={currentForm.sexo}>{currentForm.sexo}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Discapacidad
+                      </label>
+                      <input
+                        list="official-discapacidad-list"
+                        value={currentForm.discapacidad || ''}
+                        onChange={e => updateCurrentForm({ discapacidad: e.target.value })}
+                        placeholder="Ninguna"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-8">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Dirección de Domicilio
+                      </label>
+                      <input
+                        value={currentForm.direccion || ''}
+                        onChange={e => updateCurrentForm({ direccion: e.target.value })}
+                        placeholder="Ej. AV. LA CULTURA N° 733 - CUSCO"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-4">
+                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                        Ubigeo Domicilio
+                      </label>
+                      <input
+                        value={currentForm.ubigeo || ''}
+                        onChange={e => updateCurrentForm({ ubigeo: e.target.value })}
+                        placeholder="Ej. 080101"
+                        className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* PASO 4: COLEGIO, CONTINGENCIA Y CONFIRMACIÓN */}
+                {participantWizardStep === 4 && (
+                  <div className="space-y-4 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                      <div className="sm:col-span-8">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                          Colegio / Código Modular
+                        </label>
+                        <input
+                          autoFocus
+                          value={currentForm.colegio || ''}
+                          onChange={e => updateCurrentForm({ colegio: e.target.value })}
+                          placeholder="Ej. 0236653 o NOMBRE DE LA I.E."
+                          className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-bold text-sm focus:border-primary transition-all mt-1 uppercase"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                          Promedio Escolar
+                        </label>
+                        <input
+                          value={currentForm.promedio_colegio || ''}
+                          onChange={e => updateCurrentForm({ promedio_colegio: e.target.value })}
+                          placeholder="Ej. 16.40"
+                          className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-200 bg-slate-50/60 focus:bg-white outline-none font-mono font-bold text-sm focus:border-primary transition-all mt-1"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Contingencia opcional desplegable */}
+                    <div className="border border-amber-200/90 bg-amber-50/40 rounded-2xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setShowContingencySection(prev => !prev)}
+                        className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-amber-50/80 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-amber-600 text-[18px]">gavel</span>
+                          <div>
+                            <h5 className="text-[11px] font-black text-amber-950 uppercase tracking-wider">
+                              Contingencia de Examen Anulado (Opcional)
+                            </h5>
+                            <p className="text-[10px] text-amber-800/80">
+                              Solo si el concurso tuvo un examen previo anulado por Consejo Universitario.
+                            </p>
+                          </div>
+                        </div>
+                        <span className="material-symbols-outlined text-amber-700 text-[18px]">
+                          {showContingencySection ? 'expand_less' : 'expand_more'}
+                        </span>
+                      </button>
+
+                      {showContingencySection && (
+                        <div className="px-4 pb-4 pt-2 border-t border-amber-200/60 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="text-[10px] font-black text-amber-900 uppercase tracking-widest ml-1">
+                              Nota Ex. Anulado
+                            </label>
+                            <input
+                              value={currentForm.nota_examen_anulado || ''}
+                              onChange={e => updateCurrentForm({ nota_examen_anulado: e.target.value })}
+                              placeholder="Ej. 16.200"
+                              className="w-full h-10 px-3 rounded-xl border-2 border-amber-200 bg-white outline-none font-mono font-bold text-xs focus:border-amber-500 transition-all mt-1"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black text-amber-900 uppercase tracking-widest ml-1">
+                              Resolución CU
+                            </label>
+                            <input
+                              value={currentForm.resolucion_anulacion || ''}
+                              onChange={e => updateCurrentForm({ resolucion_anulacion: e.target.value })}
+                              placeholder="Res. CU-224-2022"
+                              className="w-full h-10 px-3 rounded-xl border-2 border-amber-200 bg-white outline-none font-bold text-xs focus:border-amber-500 transition-all mt-1"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-black text-amber-900 uppercase tracking-widest ml-1">
+                              Fecha Ex. Anulado
+                            </label>
+                            <input
+                              value={currentForm.fecha_examen_anulado || ''}
+                              onChange={e => updateCurrentForm({ fecha_examen_anulado: e.target.value })}
+                              placeholder="AAAA-MM-DD"
+                              className="w-full h-10 px-3 rounded-xl border-2 border-amber-200 bg-white outline-none font-mono font-bold text-xs focus:border-amber-500 transition-all mt-1"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Resumen compacto antes de guardar */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Resumen previo al guardado
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">DNI / Código</span>
+                          <span className="font-mono font-black text-slate-800">{currentForm.CODPOSTULANTE || '—'}</span>
+                        </div>
+                        <div className="col-span-1 sm:col-span-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Estudiante</span>
+                          <span className="font-black text-slate-800 uppercase truncate block">{currentForm.NOMBRE || '—'}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Carrera / Sede</span>
+                          <span className="font-bold text-slate-700 uppercase truncate block">
+                            {currentForm.CARRERA || '—'} ({currentForm.FILIAL || 'CUSCO'})
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Nota / Mérito</span>
+                          <span className="font-mono font-bold text-emerald-700">
+                            {currentForm.NOTA || '—'} / #{currentForm.OMERITO || '—'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer fijo con navegación Anterior / Siguiente / Guardar */}
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={closeParticipantModal}
+                    className="px-4 py-2 font-bold text-xs uppercase tracking-wider text-slate-500 hover:bg-slate-200 rounded-xl transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <span className="text-[11px] font-bold text-slate-400 hidden sm:inline">
+                    Paso {participantWizardStep} de 4
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  {participantWizardStep > 1 && (
+                    <button
+                      type="button"
+                      onClick={handlePrevStep}
+                      disabled={loading}
+                      className="px-4 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1 transition-all"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                      Anterior
+                    </button>
+                  )}
+
+                  {isEditMode && participantWizardStep < 4 && (
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateRecord(syncNameChecked)}
+                      disabled={loading}
+                      className="px-3.5 py-2.5 text-primary hover:bg-primary/10 rounded-xl font-black text-[11px] uppercase tracking-wider transition-all disabled:opacity-50"
+                      title="Guardar cambios directamente sin pasar por los demás pasos"
+                    >
+                      {loading ? 'Guardando...' : 'Guardar directo'}
+                    </button>
+                  )}
+
+                  {participantWizardStep < 4 ? (
+                    <button
+                      type="button"
+                      onClick={handleNextStep}
+                      className={`px-6 py-2.5 text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-md flex items-center gap-1.5 ${
+                        isEditMode ? 'bg-primary hover:bg-merlot shadow-primary/20' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                      }`}
+                    >
+                      Siguiente
+                      <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => (isEditMode ? handleUpdateRecord(syncNameChecked) : handleCreateStudent())}
+                      disabled={loading}
+                      className={`px-7 py-2.5 text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-lg disabled:opacity-50 flex items-center gap-2 ${
+                        isEditMode ? 'bg-primary shadow-primary/20 hover:bg-merlot' : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-[17px]">{isEditMode ? 'save' : 'how_to_reg'}</span>
+                      {loading
+                        ? 'Guardando...'
+                        : isEditMode
+                          ? 'Guardar Cambios'
+                          : 'Guardar Ingresante'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-      )}
+        );
+      })()}
 
       {/* Top Header Bar */}
       <div className="flex flex-wrap justify-between items-end gap-4 shrink-0">
@@ -1762,7 +3013,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                 <span className="material-symbols-outlined text-primary">search</span>
                                 Búsqueda Universal
                             </h3>
-                            <button onClick={() => setIsAddingNew(true)} className="flex items-center gap-1 text-xs font-bold text-primary hover:text-merlot transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg">
+                            <button onClick={() => openAddParticipantModal(false)} className="flex items-center gap-1 text-xs font-bold text-primary hover:text-merlot transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg">
                                 <span className="material-symbols-outlined text-[16px]">person_add</span>
                                 Nuevo
                             </button>
@@ -1777,7 +3028,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                     className="w-full rounded-xl border border-slate-300 bg-slate-50 text-slate-900 h-11 pl-10 pr-14 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-400 uppercase font-medium text-sm"
                                     placeholder="DNI O APELLIDOS Y NOMBRES..."
                                 />
-                                <button onClick={handleSearch} disabled={loading} className="absolute right-1 top-1 h-9 w-9 bg-primary hover:bg-merlot text-white rounded-lg flex items-center justify-center transition-colors shadow-sm">
+                                <button onClick={() => handleSearch()} disabled={loading} className="absolute right-1 top-1 h-9 w-9 bg-primary hover:bg-merlot text-white rounded-lg flex items-center justify-center transition-colors shadow-sm">
                                     {loading ? <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span> : <span className="material-symbols-outlined text-[18px]">search</span>}
                                 </button>
                             </div>
@@ -1786,6 +3037,52 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                             </p>
                         </div>
                     </div>
+
+                    {/* Error Banner */}
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3 animate-in fade-in">
+                            <span className="material-symbols-outlined text-red-600 text-xl shrink-0">error</span>
+                            <div className="text-xs text-red-800 font-medium">{error}</div>
+                        </div>
+                    )}
+
+                    {/* Empty State when searched and 0 matches in both Ingresantes & Postulantes */}
+                    {hasSearched && !loading && !error && !selectedProfile && candidatesList.length === 0 && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 flex flex-col items-center text-center gap-2.5 animate-in fade-in slide-in-from-bottom-2">
+                            <div className="size-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center">
+                                <span className="material-symbols-outlined text-2xl">person_off</span>
+                            </div>
+                            <div>
+                                <h4 className="font-black text-slate-800 text-xs uppercase tracking-wider">
+                                    Sin coincidencias para «{lastSearchedTerm}»
+                                </h4>
+                                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                                    No registra ingreso oficial en <code className="font-mono text-slate-700">participantes</code> ni postulaciones en los lotes cargados de <code className="font-mono text-slate-700">pre_revision_archivos</code>.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setNewStudentForm({
+                                        CODPOSTULANTE: /^\d+$/.test(lastSearchedTerm) ? lastSearchedTerm : '',
+                                        NOMBRE: !/^\d+$/.test(lastSearchedTerm) ? lastSearchedTerm.toUpperCase() : '',
+                                        ANIO: String(new Date().getFullYear()),
+                                        SEMESTRE: '2026-I',
+                                        FILIAL: 'CUSCO'
+                                    });
+                                    setParticipantWizardStep(1);
+                                    setShowContingencySection(false);
+                                    setModalError(null);
+                                    setDuplicateExistingRecord(null);
+                                    setIsAddingNew(true);
+                                }}
+                                className="mt-1 px-3.5 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                            >
+                                <span className="material-symbols-outlined text-[15px]">person_add</span>
+                                Registrar manualmente en Participantes
+                            </button>
+                        </div>
+                    )}
 
                     {/* Candidate Results List (if multiple results found) */}
                     {candidatesList.length > 0 && !selectedProfile && (
@@ -1874,15 +3171,30 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                         </div>
                                     )}
 
-                                    {/* Open Full Ficha Integral Button */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsFichaModalOpen(true)}
-                                        className="px-3.5 py-2 bg-primary hover:bg-merlot text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-primary/20 transition-all active:scale-95"
-                                    >
-                                        <span className="material-symbols-outlined text-[16px]">account_box</span>
-                                        Ficha Integral
-                                    </button>
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (selectedProfile.admissions.length > 0) {
+                                                    openEditRecordModal(selectedProfile.admissions[0]);
+                                                } else {
+                                                    openAddParticipantModal(true);
+                                                }
+                                            }}
+                                            className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center justify-center transition-all active:scale-95"
+                                            title={selectedProfile.admissions.length > 0 ? 'Editar registro en tabla participantes' : 'Agregar estudiante a tabla participantes'}
+                                        >
+                                            <span className="material-symbols-outlined text-[17px]">edit</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setIsFichaModalOpen(true)}
+                                            className="px-3.5 py-2 bg-primary hover:bg-merlot text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-primary/20 transition-all active:scale-95"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">account_box</span>
+                                            Ficha Integral
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <h3 className="text-xl font-black text-slate-900 uppercase leading-tight truncate">
@@ -1896,7 +3208,7 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                     <button 
                                         onClick={() => {
                                             navigator.clipboard.writeText(selectedProfile.dni);
-                                            alert(`DNI ${selectedProfile.dni} copiado al portapapeles`);
+                                            notifyUser(`DNI ${selectedProfile.dni} copiado al portapapeles`, 'success');
                                         }}
                                         className="text-slate-400 hover:text-slate-600 p-0.5"
                                         title="Copiar DNI"
@@ -2089,13 +3401,27 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                 </aside>
 
                 {/* Right Academic Trajectory & History */}
-                <section className={`lg:col-span-8 h-full transition-all duration-500 ${!selectedProfile ? 'opacity-30 grayscale' : 'opacity-100'}`}>
+                <section className={`lg:col-span-8 h-full transition-all duration-500 ${!selectedProfile && !(hasSearched && !loading && candidatesList.length === 0) ? 'opacity-30 grayscale' : 'opacity-100'}`}>
                     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm h-full p-6 md:p-8 flex flex-col overflow-hidden">
                         {!selectedProfile ? (
                             <div className="flex-1 flex flex-col items-center justify-center text-center py-20">
-                                <span className="material-symbols-outlined text-6xl text-slate-200 mb-4">history_edu</span>
-                                <h3 className="text-slate-400 font-black uppercase tracking-widest text-sm">Historial Académico y Procesos de Admisión</h3>
-                                <p className="text-slate-400 text-xs mt-1 max-w-sm">Ingrese un DNI o nombres para consultar la trayectoria completa del postulante o ingresante.</p>
+                                <span className="material-symbols-outlined text-6xl text-slate-200 mb-4">
+                                    {loading ? 'manage_search' : hasSearched && candidatesList.length === 0 ? 'search_off' : 'history_edu'}
+                                </span>
+                                <h3 className="text-slate-500 font-black uppercase tracking-widest text-sm">
+                                    {loading
+                                        ? 'Consultando Padrón Oficial y Lotes de Postulantes...'
+                                        : hasSearched && candidatesList.length === 0
+                                            ? `No se encontraron ingresos ni postulaciones para «${lastSearchedTerm}»`
+                                            : 'Historial Académico y Procesos de Admisión'}
+                                </h3>
+                                <p className="text-slate-400 text-xs mt-1 max-w-md">
+                                    {loading
+                                        ? 'Verificando en paralelo la tabla oficial de ingresantes (participantes), los lotes de postulación (pre_revision_archivos) y procesos reprogramados.'
+                                        : hasSearched && candidatesList.length === 0
+                                            ? 'Verifique que el DNI o los apellidos estén bien escritos. Si pertenece a un proceso antiguo aún no cargado en Pre-Revisión, no figurará como postulante.'
+                                            : 'Ingrese un DNI o nombres para consultar la trayectoria completa del postulante o ingresante.'}
+                                </p>
                             </div>
                         ) : (
                             <div className="w-full text-left flex flex-col h-full">
@@ -2109,13 +3435,24 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                         </p>
                                     </div>
 
-                                    <button
-                                        onClick={() => setIsFichaModalOpen(true)}
-                                        className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all"
-                                    >
-                                        <span className="material-symbols-outlined text-[16px]">visibility</span>
-                                        Ver Ficha Completa
-                                    </button>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => openAddParticipantModal(true)}
+                                            className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-2xs transition-all"
+                                            title="Agregar nuevo registro de ingreso oficial en la tabla participantes"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">person_add</span>
+                                            Agregar Ingreso
+                                        </button>
+                                        <button
+                                            onClick={() => setIsFichaModalOpen(true)}
+                                            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">visibility</span>
+                                            Ver Ficha Completa
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto pr-3 space-y-6 relative">
@@ -2170,6 +3507,11 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                                                     <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1">
                                                                         🎓 INGRESO OFICIAL
                                                                     </span>
+                                                                    {!item.rawAdm && (
+                                                                        <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                                                            Pendiente en Participantes
+                                                                        </span>
+                                                                    )}
                                                                     {item.carpetaDocs && (
                                                                         <span className="text-[9px] font-bold bg-white text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1 shadow-2xs">
                                                                             <span className="material-symbols-outlined text-[13px] text-amber-500">folder</span>
@@ -2184,13 +3526,22 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                                                     ADMISIÓN: {item.semestre?.includes('20') ? item.semestre : (item.anio ? `${item.anio}-${item.semestre}` : item.semestre)} • MODALIDAD: {item.modalidad} {item.sede ? `• SEDE: ${item.sede}` : '• SEDE: CUSCO'}
                                                                 </p>
                                                             </div>
-                                                            {item.rawAdm && (
+                                                            {item.rawAdm ? (
                                                                 <button 
-                                                                    onClick={() => { setEditingRecord(item.rawAdm!); setEditForm(item.rawAdm!); setIsEditing(true); }}
+                                                                    onClick={() => openEditRecordModal(item.rawAdm!)}
                                                                     className="p-2 text-emerald-700 hover:text-emerald-900 transition-colors rounded-lg hover:bg-emerald-100/60 shrink-0"
-                                                                    title="Editar registro de ingreso oficial"
+                                                                    title="Editar registro completo en tabla participantes"
                                                                 >
                                                                     <span className="material-symbols-outlined text-[18px]">edit</span>
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => openAddParticipantModal(true, item)}
+                                                                    className="px-2.5 py-1.5 text-emerald-800 bg-emerald-100/80 hover:bg-emerald-200/80 transition-colors rounded-lg shrink-0 flex items-center gap-1 text-[10px] font-black uppercase"
+                                                                    title="Registrar en tabla oficial participantes"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-[15px]">person_add</span>
+                                                                    Registrar
                                                                 </button>
                                                             )}
                                                         </div>
@@ -2206,6 +3557,11 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                                                     Puesto: #{item.puesto}
                                                                 </span>
                                                             )}
+                                                            {item.rawAdm?.codigo_carrera && (
+                                                                <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold shadow-2xs">
+                                                                    Cód. Carrera: {item.rawAdm.codigo_carrera}
+                                                                </span>
+                                                            )}
                                                             {item.grupo && (
                                                                 <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-2xs">
                                                                     Grupo: {item.grupo}
@@ -2214,6 +3570,11 @@ export const StudentLookup: React.FC<{ user: User }> = ({ user }) => {
                                                             {item.fecha && (
                                                                 <span className="bg-white text-slate-700 border border-slate-200 px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-2xs">
                                                                     Fecha: {item.fecha}
+                                                                </span>
+                                                            )}
+                                                            {item.rawAdm?.nota_examen_anulado && (
+                                                                <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg text-[10px] font-bold shadow-2xs">
+                                                                    Nota Ex. Anulado: {item.rawAdm.nota_examen_anulado}
                                                                 </span>
                                                             )}
                                                         </div>

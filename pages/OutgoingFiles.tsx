@@ -17,6 +17,13 @@ import {
   syncDriveConfigWithServer
 } from '../lib/googleDriveService';
 import { DriveConfigModal } from '../components/DriveConfigModal';
+import {
+  formatOutgoingDestination,
+  formatOutgoingDocTitle,
+  extractOutgoingOfficeDestination,
+  mergeOutgoingDestinationOffice,
+  parseOutgoingDestinationMeta
+} from '../lib/outgoingFormatters';
 
 export const DEFAULT_DESTINATIONS = [
   'ASESORIA JURIDICA',
@@ -89,6 +96,8 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
   const [refNumber, setRefNumber] = useState('');
   const [subject, setSubject] = useState('');
   const [destination, setDestination] = useState('');
+  const [editingRawDestination, setEditingRawDestination] = useState<string | null>(null);
+  const [editingStudentLabel, setEditingStudentLabel] = useState<string | null>(null);
   const [destinationList, setDestinationList] = useState<string[]>(DEFAULT_DESTINATIONS);
   const [isCustomDestination, setIsCustomDestination] = useState(false);
   const [status, setStatus] = useState<'Pendiente' | 'Finalizado' | 'Observado' | 'Archivado'>('Pendiente');
@@ -141,20 +150,11 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
         const groupedMap = new Map<string, GroupedOutgoingFile>();
 
         data.forEach((item: any) => {
-            let cleanDestination = item.destination || '-';
-            let isGenerated = false;
-            let studentName = '';
+            const meta = parseOutgoingDestinationMeta(item.destination);
+            const cleanDestination = formatOutgoingDestination(item.destination, '-');
+            let isGenerated = Boolean(meta);
+            const studentName = meta?.estudiante_nombre || '';
 
-            if (item.destination && item.destination.startsWith('{')) {
-              try {
-                const meta = JSON.parse(item.destination);
-                cleanDestination = meta.estudiante_nombre
-                  ? `ESTUDIANTE: ${meta.estudiante_nombre}`
-                  : (meta.tipo_documento || 'ESTUDIANTE');
-                isGenerated = true;
-                studentName = meta.estudiante_nombre || '';
-              } catch (e) {}
-            }
             if (item.doc_number && (item.doc_number.startsWith('UNSAAC-CONST-') || item.doc_number.startsWith('UNSAAC-INF-'))) {
               isGenerated = true;
             }
@@ -166,6 +166,7 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                 refNumber: item.ref_number || '-',
                 subject: item.subject,
                 destination: cleanDestination,
+                rawDestination: item.destination || '',
                 status: item.status || 'Pendiente',
                 pdfUrl: item.pdf_url,
                 dateTime: new Date(item.created_at).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
@@ -296,12 +297,14 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
           const cleanDestination = destination.trim().toUpperCase() || 'UNIDAD DE ADMISIÓN';
 
           if (editingId) {
+              const persistedDestination = mergeOutgoingDestinationOffice(editingRawDestination, cleanDestination);
+              const humanReadableDestination = formatOutgoingDestination(persistedDestination, cleanDestination);
               const updateData: any = {
                   doc_type: docType,
                   doc_number: cleanDocNumber,
                   ref_number: refNumber.trim() || '-',
                   subject: cleanSubject.toUpperCase(),
-                  destination: cleanDestination,
+                  destination: persistedDestination,
                   status: status,
                   pdf_url: publicUrl || null
               };
@@ -313,7 +316,7 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
               if (error) throw error;
 
               try {
-                await logOutgoingAction('Edición', docType, cleanDocNumber, cleanDestination, Boolean(publicUrl), selectedFile?.name);
+                await logOutgoingAction('Edición', docType, cleanDocNumber, humanReadableDestination, Boolean(publicUrl), selectedFile?.name);
               } catch (e) {}
 
               if (notify) notify('Expediente actualizado exitosamente', 'success');
@@ -359,10 +362,13 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
   const closeModal = () => {
       setIsModalOpen(false); 
       setEditingId(null); 
+      setDocType('Oficio');
       setDocNumber(''); 
       setRefNumber(''); 
       setSubject(''); 
       setDestination(''); 
+      setEditingRawDestination(null);
+      setEditingStudentLabel(null);
       setIsCustomDestination(false);
       setDestinationList(DEFAULT_DESTINATIONS);
       setStatus('Pendiente'); 
@@ -372,14 +378,26 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
       setModalError(null);
   };
 
-  const handleEdit = (file: any) => {
+  const handleEdit = (file: OutgoingFile) => {
       setModalError(null);
       setEditingId(file.id);
-      setDocType(file.docType);
+      setDocType(file.docType || 'Oficio');
       setDocNumber(file.docNumber);
       setRefNumber(file.refNumber === '-' ? '' : file.refNumber);
       setSubject(file.subject);
-      const dest = file.destination === '-' ? '' : file.destination;
+
+      const rawDest = file.rawDestination || file.destination || '';
+      setEditingRawDestination(rawDest || null);
+      const parsedMeta = parseOutgoingDestinationMeta(rawDest);
+      if (parsedMeta?.estudiante_nombre) {
+          setEditingStudentLabel(
+            `${parsedMeta.estudiante_nombre}${parsedMeta.estudiante_dni ? ` (DNI: ${parsedMeta.estudiante_dni})` : ''}`
+          );
+      } else {
+          setEditingStudentLabel(null);
+      }
+
+      const dest = extractOutgoingOfficeDestination(rawDest);
       setDestination(dest);
       if (dest && !DEFAULT_DESTINATIONS.includes(dest)) {
           if (isAdmin) {
@@ -602,7 +620,16 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                           <label className="flex flex-col gap-1">
                               <span className="text-[10px] font-black text-slate-500 uppercase">Tipo</span>
-                              <select value={docType} onChange={e => setDocType(e.target.value)} className="h-11 sm:h-12 px-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-xs sm:text-sm font-bold"><option>Oficio</option><option>Informe</option><option>Circular</option><option>Carta</option><option>Proveido</option></select>
+                              <select value={docType} onChange={e => setDocType(e.target.value)} className="h-11 sm:h-12 px-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-xs sm:text-sm font-bold">
+                                {!['Oficio', 'Informe', 'Circular', 'Carta', 'Proveido'].includes(docType) && docType && (
+                                  <option value={docType}>{docType}</option>
+                                )}
+                                <option>Oficio</option>
+                                <option>Informe</option>
+                                <option>Circular</option>
+                                <option>Carta</option>
+                                <option>Proveido</option>
+                              </select>
                           </label>
                           <label className="flex flex-col gap-1">
                               <span className="text-[10px] font-black text-slate-500 uppercase">Nº Documento</span>
@@ -665,6 +692,12 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                                       <option value="__custom__">➕ OTRO / ESCRIBIR NUEVO DESTINO (SOLO ADMIN)...</option>
                                   )}
                               </select>
+                              {editingStudentLabel && (
+                                  <p className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 font-bold flex items-center gap-1.5 mt-0.5">
+                                      <span className="material-symbols-outlined text-[14px]">verified</span>
+                                      <span className="truncate">Estudiante vinculado: {editingStudentLabel}</span>
+                                  </p>
+                              )}
                               {!isAdmin && (
                                   <p className="text-[10px] text-slate-400 font-medium">
                                       Catálogo oficial protegido. Si la oficina requerida no figura en la lista, seleccione 'OTROS' y especifique en el asunto.
@@ -860,9 +893,9 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                                   {selectedTrackingFile.status}
                               </span>
                           </div>
-                          <p className="font-bold text-slate-800 text-sm sm:text-base">{selectedTrackingFile.docType} {selectedTrackingFile.docNumber}</p>
-                          <p className="text-xs sm:text-sm text-slate-600 leading-snug">{selectedTrackingFile.subject}</p>
-                          <p className="text-xs text-slate-500 font-medium mt-0.5">Destino: <span className="font-bold">{selectedTrackingFile.destination}</span></p>
+                          <p className="font-bold text-slate-800 text-sm sm:text-base break-words">{formatOutgoingDocTitle(selectedTrackingFile.docType, selectedTrackingFile.docNumber)}</p>
+                          <p className="text-xs sm:text-sm text-slate-600 leading-snug break-words">{selectedTrackingFile.subject}</p>
+                          <p className="text-xs text-slate-500 font-medium mt-0.5 break-words">Destino: <span className="font-bold">{selectedTrackingFile.destination}</span></p>
                       </div>
 
                       {/* Add Note */}

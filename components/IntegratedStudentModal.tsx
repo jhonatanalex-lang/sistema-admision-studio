@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Participant } from '../types';
 import { StudentDocument, getDocumentStreamUrl } from '../lib/fileGateway';
 import { DocumentViewerModal } from './DocumentViewerModal';
-import { fixCareerName } from '../pages/StudentLookup';
+import { fixCareerName, isApplicantAdmitted } from '../pages/StudentLookup';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -200,10 +200,11 @@ export const IntegratedStudentModal: React.FC<IntegratedStudentModalProps> = ({
 
     // Applications
     data.applications.forEach(app => {
+      const admitted = isApplicantAdmitted(app.condicion, app.rawRow);
       historyRows.push([
-        app.condicion?.toUpperCase().includes('INGRESA') ? 'INGRESANTE (PROCESO)' : 'POSTULACIÓN',
+        admitted ? 'INGRESANTE (PROCESO)' : 'POSTULACIÓN',
         app.modalidad,
-        fixCareerName(app.carreraIngreso || app.carrera1 || app.carrera2) || '-',
+        fixCareerName(admitted ? (app.carreraIngreso || app.carrera1 || app.carrera2) : (app.carrera1 || app.carrera2 || app.carreraIngreso)) || '-',
         app.modalidad,
         app.nota || '-',
         app.puesto ? `Puesto ${app.puesto}` : '-',
@@ -599,7 +600,7 @@ export const IntegratedStudentModal: React.FC<IntegratedStudentModalProps> = ({
                             <div>
                               <span className="text-[9px] font-bold text-slate-400 uppercase">Condición</span>
                               <p className={`font-bold uppercase truncate ${
-                                app.condicion?.includes('INGRESA') ? 'text-emerald-400' : 'text-slate-300'
+                                isApplicantAdmitted(app.condicion, app.rawRow) ? 'text-emerald-400' : 'text-slate-300'
                               }`}>
                                 {app.condicion || 'PARTICIPANTE'}
                               </p>

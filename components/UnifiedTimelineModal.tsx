@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { isGoogleDriveUrl, formatDriveViewUrl } from '../lib/googleDriveService';
+import {
+  formatOutgoingDestination,
+  formatOutgoingDocTitle,
+  parseOutgoingDestinationMeta
+} from '../lib/outgoingFormatters';
 
 interface UnifiedTimelineEvent {
   id: string;
@@ -22,6 +27,8 @@ interface UnifiedTimelineModalProps {
   onClose: () => void;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expedienteNumber, outgoingFileId, onClose }) => {
   const [events, setEvents] = useState<UnifiedTimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,6 +45,24 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
         const timelineEvents: UnifiedTimelineEvent[] = [];
         let outgoingIds: string[] = [];
 
+        // Cargar directorio de usuarios para traducir UUIDs de created_by a nombres reales
+        const userMap = new Map<string, string>();
+        const { data: usersData } = await supabase.from('usuarios').select('id, nombre');
+        if (usersData) {
+          usersData.forEach((u: any) => {
+            if (u.id && u.nombre) userMap.set(u.id, u.nombre);
+          });
+        }
+
+        const resolveUserName = (rawUser?: string | null, metaUser?: string | null): string => {
+          if (metaUser && metaUser.trim()) return metaUser.trim();
+          if (!rawUser || !rawUser.trim()) return 'Sistema';
+          const trimmed = rawUser.trim();
+          if (userMap.has(trimmed)) return userMap.get(trimmed)!;
+          if (UUID_REGEX.test(trimmed)) return 'Operador / Sistema';
+          return trimmed;
+        };
+
         if (expedienteNumber && expedienteNumber !== '-') {
           // 1. Fetch Incoming Files
           const { data: incomingData, error: incomingError } = await supabase
@@ -47,14 +72,20 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
 
           if (!incomingError && incomingData) {
             incomingData.forEach((item: any) => {
+              const incomingSubtitle = item.sender
+                ? `Remitente: ${item.sender}`
+                : item.type
+                ? `Tipo de trámite: ${item.type}`
+                : undefined;
+
               timelineEvents.push({
                 id: `in_${item.id}`,
                 type: 'incoming',
                 date: new Date(item.created_at),
                 title: `Ingreso: ${item.subject}`,
-                subtitle: `Remitente: ${item.sender}`,
+                subtitle: incomingSubtitle,
                 status: item.status,
-                user: item.created_by,
+                user: resolveUserName(item.created_by),
                 pdfUrl: item.pdf_url,
               });
             });
@@ -78,15 +109,9 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
             outgoingData.forEach((item: any) => {
               outgoingIds.push(item.id);
 
-              let destText = item.destination || '-';
-              let isGen = false;
-              if (item.destination && item.destination.startsWith('{')) {
-                try {
-                  const meta = JSON.parse(item.destination);
-                  destText = meta.estudiante_nombre ? `Estudiante: ${meta.estudiante_nombre}` : (meta.tipo_documento || 'Estudiante');
-                  isGen = true;
-                } catch (e) {}
-              }
+              const meta = parseOutgoingDestinationMeta(item.destination);
+              const destText = formatOutgoingDestination(item.destination, '-');
+              let isGen = Boolean(meta);
               if (item.doc_number && (item.doc_number.startsWith('UNSAAC-CONST-') || item.doc_number.startsWith('UNSAAC-INF-') || item.doc_type?.toLowerCase().includes('informe') || item.doc_type?.toLowerCase().includes('constancia'))) {
                 isGen = true;
               }
@@ -98,10 +123,10 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
                 id: `out_${item.id}`,
                 type: 'outgoing',
                 date: new Date(item.created_at),
-                title: `Salida: ${item.doc_type} ${item.doc_number}`,
+                title: `Salida: ${formatOutgoingDocTitle(item.doc_type, item.doc_number)}`,
                 subtitle: `Destino: ${destText} | Asunto: ${item.subject}`,
                 status: item.status,
-                user: item.created_by,
+                user: resolveUserName(item.created_by, meta?.usuario_nombre),
                 pdfUrl: effectivePdf,
                 docType: item.doc_type,
                 isGenerated: isGen,
@@ -120,15 +145,9 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
               .single();
               
             if (!singleOutgoingError && singleOutgoingData) {
-                let destText = singleOutgoingData.destination || '-';
-                let isGen = false;
-                if (singleOutgoingData.destination && singleOutgoingData.destination.startsWith('{')) {
-                  try {
-                    const meta = JSON.parse(singleOutgoingData.destination);
-                    destText = meta.estudiante_nombre ? `Estudiante: ${meta.estudiante_nombre}` : (meta.tipo_documento || 'Estudiante');
-                    isGen = true;
-                  } catch (e) {}
-                }
+                const meta = parseOutgoingDestinationMeta(singleOutgoingData.destination);
+                const destText = formatOutgoingDestination(singleOutgoingData.destination, '-');
+                let isGen = Boolean(meta);
                 if (singleOutgoingData.doc_number && (singleOutgoingData.doc_number.startsWith('UNSAAC-CONST-') || singleOutgoingData.doc_number.startsWith('UNSAAC-INF-') || singleOutgoingData.doc_type?.toLowerCase().includes('informe') || singleOutgoingData.doc_type?.toLowerCase().includes('constancia'))) {
                   isGen = true;
                 }
@@ -139,10 +158,10 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
                     id: `out_${singleOutgoingData.id}`,
                     type: 'outgoing',
                     date: new Date(singleOutgoingData.created_at),
-                    title: `Salida: ${singleOutgoingData.doc_type} ${singleOutgoingData.doc_number}`,
+                    title: `Salida: ${formatOutgoingDocTitle(singleOutgoingData.doc_type, singleOutgoingData.doc_number)}`,
                     subtitle: `Destino: ${destText} | Asunto: ${singleOutgoingData.subject}`,
                     status: singleOutgoingData.status,
-                    user: singleOutgoingData.created_by,
+                    user: resolveUserName(singleOutgoingData.created_by, meta?.usuario_nombre),
                     pdfUrl: singleOutgoingData.pdf_url,
                     docType: singleOutgoingData.doc_type,
                     isGenerated: isGen,
@@ -166,7 +185,7 @@ export const UnifiedTimelineModal: React.FC<UnifiedTimelineModalProps> = ({ expe
                 date: new Date(item.created_at),
                 title: `Seguimiento: ${item.action_type}`,
                 subtitle: item.description,
-                user: item.user_name,
+                user: resolveUserName(item.user_name),
               });
             });
           }

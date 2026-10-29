@@ -16,6 +16,12 @@ import {
 } from '../lib/templateVerification';
 import { logAuditEvent, logOutgoingAction, logEmissionAction } from '../lib/auditLogger';
 import { DEFAULT_DESTINATIONS } from './OutgoingFiles';
+import {
+  formatOutgoingDestination,
+  formatOutgoingDocTitle,
+  isSerializedJsonDestination,
+  parseOutgoingDestinationMeta
+} from '../lib/outgoingFormatters';
 
 
 
@@ -285,9 +291,20 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           if (data) {
               const cleanDbDestinations = data
                 .map((item: any) => {
-                  const raw = item.destination;
-                  if (!raw || raw.startsWith('{') || raw.startsWith('[') || raw === '-') return null;
-                  return raw.trim().toUpperCase();
+                  const raw = typeof item.destination === 'string' ? item.destination.trim() : '';
+                  if (
+                    !raw ||
+                    raw === '-' ||
+                    isSerializedJsonDestination(raw) ||
+                    raw.includes('{') ||
+                    raw.includes('}') ||
+                    raw.toUpperCase().startsWith('ESTUDIANTE:') ||
+                    raw.toUpperCase().startsWith('TRÁMITE:') ||
+                    raw.length > 65
+                  ) {
+                    return null;
+                  }
+                  return raw.toUpperCase();
                 })
                 .filter(Boolean) as string[];
               const uniqueDestinations = Array.from(new Set([...DEFAULT_DESTINATIONS, ...cleanDbDestinations])).sort((a, b) => a.localeCompare(b));
@@ -368,14 +385,12 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
         salidasData.forEach((s: any) => {
           let expNum = s.ref_number;
           let isGen = false;
-          if (s.destination && s.destination.startsWith('{')) {
-            try {
-              const meta = JSON.parse(s.destination);
-              if (meta.expediente_numero) {
-                expNum = meta.expediente_numero;
-              }
-              isGen = true;
-            } catch (e) {}
+          const meta = parseOutgoingDestinationMeta(s.destination);
+          if (meta) {
+            if (meta.expediente_numero) {
+              expNum = meta.expediente_numero;
+            }
+            isGen = true;
           }
           if (s.doc_number && (s.doc_number.startsWith('UNSAAC-CONST-') || s.doc_number.startsWith('UNSAAC-INF-') || s.doc_type?.toLowerCase().includes('informe') || s.doc_type?.toLowerCase().includes('constancia'))) {
             isGen = true;
@@ -1665,8 +1680,25 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                   salidaInsertPayload.created_by = user.id;
               }
 
-              const { error: salidaInsertError } = await supabase.from('expedientes_salida').insert([salidaInsertPayload]);
-              if (salidaInsertError) throw salidaInsertError;
+              const { data: existingSalidas } = await supabase
+                  .from('expedientes_salida')
+                  .select('id')
+                  .eq('ref_number', fileToAttend.number)
+                  .eq('doc_type', issuedDocType)
+                  .order('created_at', { ascending: false });
+
+              if (existingSalidas && existingSalidas.length > 0) {
+                  const { error: salidaUpdateError } = await supabase
+                      .from('expedientes_salida')
+                      .update(salidaInsertPayload)
+                      .eq('id', existingSalidas[0].id);
+                  if (salidaUpdateError) throw salidaUpdateError;
+              } else {
+                  const { error: salidaInsertError } = await supabase
+                      .from('expedientes_salida')
+                      .insert([salidaInsertPayload]);
+                  if (salidaInsertError) throw salidaInsertError;
+              }
 
               // Registrar en auditoría central
               try {
@@ -1731,21 +1763,77 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               }
           }
 
-              if (fileToAttend.subject.toUpperCase().includes('RENUNCIA')) {
+              const isRenunciaFlow =
+                  fileToAttend.subject.toUpperCase().includes('RENUNCIA') ||
+                  Boolean(selectedTemplate?.name?.toUpperCase().includes('RENUNCIA'));
+
+              if (isRenunciaFlow) {
                   const rawRenunciaInf = (manualValues['INFORME'] || '').trim();
                   const normalizedRenunciaInf = rawRenunciaInf && /^\d{1,5}\s*-\s*\d{4}$/.test(rawRenunciaInf)
                     ? `INFORME ${rawRenunciaInf.replace(/\s+/g, '')}`
                     : rawRenunciaInf.toUpperCase();
-                  await supabase.from('renuncias').insert([{
-                      student_name: selectedStudent.NOMBRE,
-                      student_code: selectedStudent.CODPOSTULANTE,
-                      school: selectedStudent.CARRERA,
-                      semester: selectedStudent.SEMESTRE || '',
-                      expediente_number: fileToAttend.number,
-                      informe_number: normalizedRenunciaInf || manualValues['INFORME'],
-                      informe_pdf: urlData.publicUrl,
-                      status: 'Pendiente Resolución'
-                  }]);
+                  const finalInformeNumber = normalizedRenunciaInf || (manualValues['INFORME'] || '').trim();
+                  const renunciaStudentName = (manualValues['NOMBRECORRE'] || '').trim()
+                    ? manualValues['NOMBRECORRE'].trim().toUpperCase()
+                    : selectedStudent.NOMBRE;
+                  const targetExpNum = String(fileToAttend.number || '').trim();
+                  const targetSchool = String(selectedStudent.CARRERA || '').trim().toUpperCase();
+                  const targetSemester = String(selectedStudent.SEMESTRE || '').trim();
+
+                  // Verificar si ya existe un trámite de renuncia para este mismo expediente o ingreso pendiente
+                  const { data: existingRenuncias } = await supabase
+                      .from('renuncias')
+                      .select('*')
+                      .eq('student_code', selectedStudent.CODPOSTULANTE)
+                      .order('created_at', { ascending: false });
+
+                  const matchingRenuncias = (existingRenuncias || []).filter(r => {
+                      const rowExp = String(r.expediente_number || '').trim();
+                      const rowSchool = String(r.school || '').trim().toUpperCase();
+                      const rowSem = String(r.semester || '').trim();
+                      if (targetExpNum && rowExp && rowExp === targetExpNum) return true;
+                      if (r.status === 'Pendiente Resolución' && rowSchool === targetSchool && rowSem === targetSemester) return true;
+                      return false;
+                  });
+
+                  if (matchingRenuncias.length > 0) {
+                      // Priorizar fila ya Finalizada para nunca degradar su estado; si no, usar la más reciente
+                      const primaryRow = matchingRenuncias.find(r => r.status === 'Finalizado') || matchingRenuncias[0];
+                      const updatePayload: Record<string, any> = {
+                          student_name: renunciaStudentName,
+                          school: selectedStudent.CARRERA,
+                          semester: selectedStudent.SEMESTRE || primaryRow.semester || '',
+                          expediente_number: fileToAttend.number || primaryRow.expediente_number,
+                          informe_pdf: urlData.publicUrl
+                      };
+                      if (finalInformeNumber) {
+                          updatePayload.informe_number = finalInformeNumber;
+                      }
+
+                      await supabase
+                          .from('renuncias')
+                          .update(updatePayload)
+                          .eq('id', primaryRow.id);
+
+                      // Limpiar posibles duplicados pendientes sobrantes del mismo expediente
+                      const extraPendingIds = matchingRenuncias
+                          .filter(r => r.id !== primaryRow.id && r.status !== 'Finalizado')
+                          .map(r => r.id);
+                      if (extraPendingIds.length > 0) {
+                          await supabase.from('renuncias').delete().in('id', extraPendingIds);
+                      }
+                  } else {
+                      await supabase.from('renuncias').insert([{
+                          student_name: renunciaStudentName,
+                          student_code: selectedStudent.CODPOSTULANTE,
+                          school: selectedStudent.CARRERA,
+                          semester: selectedStudent.SEMESTRE || '',
+                          expediente_number: fileToAttend.number,
+                          informe_number: finalInformeNumber,
+                          informe_pdf: urlData.publicUrl,
+                          status: 'Pendiente Resolución'
+                      }]);
+                  }
               }
           
           // 5. Trigger Download (Automatic only if it's not a constancia, e.g. it's an Informe or general document)
@@ -2218,17 +2306,23 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                       )}
                       
                       {matchedOutgoingFile && (
-                          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2">
+                          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 overflow-hidden">
                               <div className="flex items-center gap-2 text-blue-700">
-                                  <span className="material-symbols-outlined text-xl">info</span>
+                                  <span className="material-symbols-outlined text-xl shrink-0">info</span>
                                   <span className="text-xs font-black uppercase tracking-widest">Expediente de Retorno Detectado</span>
                               </div>
-                              <div className="bg-white p-3 rounded-xl border border-blue-100 text-sm flex flex-col gap-1">
-                                  <p className="font-bold text-slate-800">{matchedOutgoingFile.doc_type} {matchedOutgoingFile.doc_number}</p>
-                                  <p className="text-slate-600 line-clamp-2">{matchedOutgoingFile.subject}</p>
-                                  <div className="flex justify-between items-center mt-1 text-xs text-slate-500">
-                                      <span>Destino: <strong className="text-slate-700">{matchedOutgoingFile.destination}</strong></span>
-                                      <span>{new Date(matchedOutgoingFile.created_at).toLocaleDateString('es-PE')}</span>
+                              <div className="bg-white p-3.5 rounded-xl border border-blue-100 text-sm flex flex-col gap-1.5 min-w-0 overflow-hidden">
+                                  <p className="font-black text-slate-800 break-words leading-snug">
+                                      {formatOutgoingDocTitle(matchedOutgoingFile.doc_type, matchedOutgoingFile.doc_number)}
+                                  </p>
+                                  <p className="text-xs font-medium text-slate-600 line-clamp-2 break-words">{matchedOutgoingFile.subject}</p>
+                                  <div className="flex flex-wrap justify-between items-center gap-x-3 gap-y-1 mt-1 pt-1.5 border-t border-slate-100 text-xs text-slate-500 min-w-0">
+                                      <span className="min-w-0 break-words">
+                                          Destino: <strong className="text-slate-700">{formatOutgoingDestination(matchedOutgoingFile.destination)}</strong>
+                                      </span>
+                                      <span className="shrink-0 font-semibold text-slate-400">
+                                          {new Date(matchedOutgoingFile.created_at).toLocaleDateString('es-PE')}
+                                      </span>
                                   </div>
                               </div>
                               <label className="flex items-center gap-3 cursor-pointer mt-1 group">

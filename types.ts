@@ -113,6 +113,7 @@ export interface OutgoingFile {
   refNumber: string; 
   subject: string;
   destination?: string;
+  rawDestination?: string;
   status?: 'Pendiente' | 'Finalizado' | 'Observado' | 'Archivado';
   pdfUrl?: string; 
   dateTime: string;
@@ -217,6 +218,7 @@ export interface Resignation {
   resolution_pdf?: string;
   created_at: string;
   modality?: string;
+  duplicateIds?: string[];
 }
 
 export interface PaymentRegistry {
@@ -271,6 +273,9 @@ export interface Participant {
   fecha_nacimiento?: string | null;
   sexo?: string | null;
   discapacidad?: string | null;
+  nota_examen_anulado?: string | null;
+  resolucion_anulacion?: string | null;
+  fecha_examen_anulado?: string | null;
 }
 
 export interface AttendanceRecord {
