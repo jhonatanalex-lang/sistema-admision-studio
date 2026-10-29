@@ -401,11 +401,16 @@ export interface ActaFirmante {
 
 export interface PersonalProceso {
   id: string;
-  modalidad_id: string;
+  modalidad_id?: string | null;
+  simulacro_id?: string | null;
+  asociado_custom?: string | null;
   nombre: string;
   estado: 'Borrador' | 'Activo' | 'Finalizado';
   created_at: string;
   cv_modalidades?: CVModalidad; // joined relation
+  simulacros?: { id: string; nombre: string; fecha?: string }; // joined relation
+  modalidad?: { id: string; nombre: string };
+  simulacro?: { id: string; nombre: string; fecha?: string };
 }
 
 export interface PersonalNecesidad {

@@ -47,6 +47,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   // Procesos State
   const [procesos, setProcesos] = useState<PersonalProceso[]>([]);
   const [modalidades, setModalidades] = useState<any[]>([]); // For selector
+  const [simulacrosList, setSimulacrosList] = useState<{ id: string; nombre: string; fecha?: string }[]>([]);
+  const [asociadoTipo, setAsociadoTipo] = useState<'modalidad' | 'simulacro' | 'libre'>('modalidad');
+  const [newProcesoSimulacro, setNewProcesoSimulacro] = useState('');
+  const [newProcesoAsociadoLibre, setNewProcesoAsociadoLibre] = useState('');
   const [selectedProceso, setSelectedProceso] = useState<PersonalProceso | null>(null);
   const [necesidades, setNecesidades] = useState<PersonalNecesidad[]>([]);
   
@@ -54,16 +58,28 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const [showNewProceso, setShowNewProceso] = useState(false);
   const [newProcesoName, setNewProcesoName] = useState('');
   const [newProcesoModalidad, setNewProcesoModalidad] = useState('');
-  const [newNecesidades, setNewNecesidades] = useState<{cargo: string, cantidad: number}[]>([]);
+  const [newNecesidades, setNewNecesidades] = useState<{cargo: string, cantidad: number, isCustom?: boolean}[]>([]);
 
   // Cargos State
   const [dbCargos, setDbCargos] = useState<PersonalCargo[]>([]);
+
+  // Helper de normalización para asegurar consistencia
+  const normalizeCargoName = (c: string) => (c || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
   // Sorteos State
   const [sorteos, setSorteos] = useState<PersonalSorteo[]>([]);
   const [selectedSorteoProceso, setSelectedSorteoProceso] = useState<string>('');
   const [isImportSorteosModalOpen, setIsImportSorteosModalOpen] = useState(false);
   const sortFileInput = useRef<HTMLInputElement>(null);
+
+  // Catálogo unificado disponible para este proceso (Cargos permanentes + Necesidades registradas + Sorteados)
+  const availableProcessCargos = useMemo(() => {
+      const set = new Set<string>();
+      dbCargos.forEach(c => { if (c.nombre) set.add(normalizeCargoName(c.nombre)); });
+      necesidades.forEach(n => { if (n.cargo) set.add(normalizeCargoName(n.cargo)); });
+      sorteos.forEach(s => { if (s.cargo) set.add(normalizeCargoName(s.cargo)); });
+      return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [dbCargos, necesidades, sorteos]);
 
   // Schedule Builder State
   const [scheduleBuilderOpen, setScheduleBuilderOpen] = useState(false);
@@ -79,7 +95,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
   // -> New states for Edit Necesidades and Sorteo Manual/Filters
   const [isEditingNecesidades, setIsEditingNecesidades] = useState(false);
-  const [editNecesidadesRows, setEditNecesidadesRows] = useState<{id?: string, cargo: string, cantidad: number}[]>([]);
+  const [editNecesidadesRows, setEditNecesidadesRows] = useState<{id?: string, cargo: string, cantidad: number, isCustom?: boolean}[]>([]);
 
   const [showAddSorteo, setShowAddSorteo] = useState(false);
   const [newSorteo, setNewSorteo] = useState({ dni: '', nombres: '', cargo: '', condicion_sorteo: 'Titular', email_personal: '', telefono: '' });
@@ -137,11 +153,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
   useEffect(() => {
     fetchDbCargos();
+    fetchSimulacros();
     if (activeTab === 'directorio') {
       fetchDirectorio();
     } else if (activeTab === 'procesos') {
       fetchProcesos();
       fetchModalidades();
+      fetchSimulacros();
     } else if (activeTab === 'sorteos') {
       fetchProcesos();
     }
@@ -274,7 +292,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
   const fetchProcesos = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from('personal_procesos').select('*, cv_modalidades(nombre)').order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('personal_procesos')
+      .select('*, cv_modalidades(id, nombre), simulacros(id, nombre, fecha)')
+      .order('created_at', { ascending: false });
     
     if (error) {
         console.error("Error al obtener procesos:", error);
@@ -282,15 +303,26 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
     }
 
     if (!error && data) {
-         // Supabase returns relations using the table name if not explicitly aliased in some cases, or aliased.
-         // Let's format it to match what the UI expects.
          const formattedData = data.map(d => ({
              ...d,
-             modalidad: Array.isArray(d.cv_modalidades) ? d.cv_modalidades[0] : d.cv_modalidades
+             modalidad: Array.isArray(d.cv_modalidades) ? d.cv_modalidades[0] : d.cv_modalidades,
+             simulacro: Array.isArray(d.simulacros) ? d.simulacros[0] : d.simulacros
          }));
          setProcesos(formattedData as any[]);
     }
     setLoading(false);
+  };
+
+  const fetchSimulacros = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('simulacros')
+        .select('id, nombre, fecha')
+        .order('created_at', { ascending: false });
+      if (!error && data) setSimulacrosList(data);
+    } catch (e) {
+      console.warn("No se pudo cargar tabla simulacros:", e);
+    }
   };
 
   const fetchModalidades = async () => {
@@ -364,7 +396,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
   // == Procesos Functions ==
   const handleEditNecesidades = () => {
-      setEditNecesidadesRows(necesidades.map(n => ({ id: n.id, cargo: n.cargo, cantidad: n.cantidad_requerida })));
+      setEditNecesidadesRows(necesidades.map(n => ({ 
+          id: n.id, 
+          cargo: n.cargo, 
+          cantidad: n.cantidad_requerida,
+          isCustom: !dbCargos.some(c => normalizeCargoName(c.nombre) === normalizeCargoName(n.cargo))
+      })));
       setIsEditingNecesidades(true);
   }
 
@@ -375,11 +412,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           const { error: delError } = await supabase.from('personal_necesidades').delete().eq('proceso_id', selectedProceso.id);
           if (delError) throw delError;
 
-          const necToInsert = editNecesidadesRows.filter(n => n.cantidad > 0).map(n => ({
-              proceso_id: selectedProceso.id,
-              cargo: n.cargo,
-              cantidad_requerida: n.cantidad
-          }));
+          const necToInsert = editNecesidadesRows
+              .filter(n => n.cargo && n.cargo.trim() && n.cantidad > 0)
+              .map(n => ({
+                  proceso_id: selectedProceso.id,
+                  cargo: normalizeCargoName(n.cargo),
+                  cantidad_requerida: n.cantidad
+              }));
 
           if (necToInsert.length > 0) {
               const { error: insError } = await supabase.from('personal_necesidades').insert(necToInsert);
@@ -396,8 +435,12 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       }
   }
 
-  const handleAddNecesidadRow = () => {
-      setNewNecesidades([...newNecesidades, { cargo: dbCargos.length > 0 ? dbCargos[0].nombre : '', cantidad: 0 }]);
+  const handleAddNecesidadRow = (isCustom = false) => {
+      setNewNecesidades([...newNecesidades, { 
+          cargo: isCustom ? '' : (availableProcessCargos[0] || (dbCargos.length > 0 ? dbCargos[0].nombre : '')), 
+          cantidad: 0,
+          isCustom 
+      }]);
   }
 
   const handleUpdateNecesidad = (idx: number, field: string, value: any) => {
@@ -412,37 +455,72 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   }
 
   const handleSaveProceso = async () => {
-      if (!newProcesoName || !newProcesoModalidad) {
-          notify('Por favor, ingresa el nombre y selecciona la modalidad.', 'warning');
+      if (!newProcesoName.trim()) {
+          notify('Por favor, ingresa el nombre del proceso.', 'warning');
           return;
       }
+      if (asociadoTipo === 'modalidad' && !newProcesoModalidad) {
+          notify('Por favor, selecciona una modalidad oficial del catálogo.', 'warning');
+          return;
+      }
+      if (asociadoTipo === 'simulacro' && !newProcesoSimulacro) {
+          notify('Por favor, selecciona un simulacro existente.', 'warning');
+          return;
+      }
+      if (asociadoTipo === 'libre' && !newProcesoAsociadoLibre.trim()) {
+          notify('Por favor, escribe la denominación del evento operativo.', 'warning');
+          return;
+      }
+
       setLoading(true);
       try {
-          const { data: proceso, error: procError } = await supabase.from('personal_procesos').insert([{
-              nombre: newProcesoName,
-              modalidad_id: newProcesoModalidad,
+          const insertPayload: any = {
+              nombre: newProcesoName.trim().toUpperCase(),
               estado: 'Borrador'
-          }]).select().single();
+          };
+
+          if (asociadoTipo === 'modalidad') {
+              insertPayload.modalidad_id = newProcesoModalidad;
+              insertPayload.simulacro_id = null;
+              insertPayload.asociado_custom = null;
+          } else if (asociadoTipo === 'simulacro') {
+              insertPayload.modalidad_id = null;
+              insertPayload.simulacro_id = newProcesoSimulacro;
+              insertPayload.asociado_custom = null;
+          } else {
+              insertPayload.modalidad_id = null;
+              insertPayload.simulacro_id = null;
+              insertPayload.asociado_custom = newProcesoAsociadoLibre.trim().toUpperCase();
+          }
+
+          const { data: proceso, error: procError } = await supabase.from('personal_procesos')
+              .insert([insertPayload])
+              .select()
+              .single();
 
           if (procError) throw procError;
 
-          if (newNecesidades.length > 0) {
-              const necToInsert = newNecesidades.filter(n => n.cantidad > 0).map(n => ({
+          const validNec = newNecesidades
+              .filter(n => n.cargo && n.cargo.trim() && n.cantidad > 0)
+              .map(n => ({
                   proceso_id: proceso.id,
-                  cargo: n.cargo,
+                  cargo: normalizeCargoName(n.cargo),
                   cantidad_requerida: n.cantidad
               }));
-              if (necToInsert.length > 0) {
-                  const { error: necError } = await supabase.from('personal_necesidades').insert(necToInsert);
-                  if (necError) throw necError;
-              }
+
+          if (validNec.length > 0) {
+              const { error: necError } = await supabase.from('personal_necesidades').insert(validNec);
+              if (necError) throw necError;
           }
           
-          notify('Proceso y necesidades guardados.', 'success');
+          notify('Proceso y requerimientos guardados correctamente.', 'success');
           setShowNewProceso(false);
           setNewProcesoName('');
           setNewProcesoModalidad('');
+          setNewProcesoSimulacro('');
+          setNewProcesoAsociadoLibre('');
           setNewNecesidades([]);
+          setAsociadoTipo('modalidad');
           fetchProcesos();
       } catch (err: any) {
           notify(err.message, 'error');
@@ -467,24 +545,64 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       skipEmptyLines: true,
       complete: async (results) => {
         try {
-          const validRecords = results.data.map((row: any) => ({
-            proceso_id: selectedSorteoProceso,
-            cargo: row['cargo'] || row['CARGO'] || '',
-            dni: row['dni'] || row['DNI'] || '',
-            nombres: row['nombres'] || row['NOMBRES'] || '',
-            condicion_sorteo: row['sorteado'] || row['SORTEADO'] || 'Suplente',
-            email_personal: row['emailpersonal'] || row['EMAILPERSONAL'] || row['email'] || '',
-            telefono: row['telefono'] || row['TELEFONO'] || '',
-            estado_confirmacion: 'Pendiente'
-          })).filter(r => r.dni && r.nombres);
+          const rawRecords = results.data as any[];
+          const validRecords = rawRecords.map((row: any) => {
+            const rawCargo = row['cargo'] || row['CARGO'] || '';
+            const rawDni = row['dni'] || row['DNI'] || '';
+            const rawNombres = row['nombres'] || row['NOMBRES'] || '';
+            const rawSorteado = row['sorteado'] || row['SORTEADO'] || 'Suplente';
+            const rawEmail = row['emailpersonal'] || row['EMAILPERSONAL'] || row['email'] || row['correo'] || '';
+            const rawTel = row['telefono'] || row['TELEFONO'] || '';
+
+            return {
+              proceso_id: selectedSorteoProceso,
+              cargo: normalizeCargoName(rawCargo),
+              dni: String(rawDni).trim(),
+              nombres: String(rawNombres).trim().toUpperCase(),
+              condicion_sorteo: String(rawSorteado).trim().toLowerCase().includes('titu') ? 'Titular' : 'Suplente',
+              email_personal: String(rawEmail).trim(),
+              telefono: String(rawTel).trim(),
+              estado_confirmacion: 'Pendiente'
+            };
+          }).filter(r => r.dni && r.nombres && r.cargo);
 
           if (validRecords.length === 0) {
-              notify('No se encontraron registros válidos.', 'error');
+              notify('No se encontraron registros válidos en el CSV (debe contener CARGO, DNI y NOMBRES).', 'error');
               setLoading(false);
               return;
           }
 
-          // In a real app we'd map to directorio here, but currently it's optional
+          // Auto-registro inteligente de cargos no contemplados previamente en el proceso
+          const { data: currentNec } = await supabase
+              .from('personal_necesidades')
+              .select('*')
+              .eq('proceso_id', selectedSorteoProceso);
+          
+          const existingMap = new Map<string, any>();
+          (currentNec || []).forEach(n => existingMap.set(normalizeCargoName(n.cargo), n));
+
+          // Agrupar titulares por cargo para cantidad base
+          const titularesCountByCargo = new Map<string, number>();
+          validRecords.forEach(r => {
+              if (r.condicion_sorteo === 'Titular') {
+                  titularesCountByCargo.set(r.cargo, (titularesCountByCargo.get(r.cargo) || 0) + 1);
+              }
+          });
+
+          const uniqueCargosInCSV = Array.from(new Set(validRecords.map(r => r.cargo)));
+          const missingCargos = uniqueCargosInCSV.filter(c => !existingMap.has(c));
+
+          let newCargosAdded = 0;
+          if (missingCargos.length > 0) {
+              const necToInsert = missingCargos.map(cargoName => ({
+                  proceso_id: selectedSorteoProceso,
+                  cargo: cargoName,
+                  cantidad_requerida: Math.max(1, titularesCountByCargo.get(cargoName) || 1)
+              }));
+              const { error: necInsErr } = await supabase.from('personal_necesidades').insert(necToInsert);
+              if (!necInsErr) newCargosAdded = necToInsert.length;
+          }
+
           const { error } = await supabase.from('personal_sorteos').insert(validRecords);
           if (error) throw error;
           
@@ -497,11 +615,16 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
                   if (r.telefono) updateData.telefono = r.telefono;
                   return supabase.from('personal_directorio').update(updateData).eq('dni', r.dni);
               });
-              await Promise.allSettled(syncPromises); // Run in parallel, ignore errors to not break main flow
+              await Promise.allSettled(syncPromises);
           }
 
-          notify(`Importados ${validRecords.length} sorteados exitosamente.`);
+          const msg = newCargosAdded > 0 
+            ? `Importados ${validRecords.length} sorteados exitosamente. Se incorporaron ${newCargosAdded} cargo(s) nuevo(s) al cuadro de necesidades.`
+            : `Importados ${validRecords.length} sorteados exitosamente.`;
+          notify(msg, 'success');
+          
           fetchSorteos(selectedSorteoProceso);
+          fetchNecesidades(selectedSorteoProceso);
         } catch (err: any) {
              notify(err.message, 'error');
         } finally {
@@ -587,14 +710,27 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       }
       setLoading(true);
       try {
+          const normCargo = normalizeCargoName(newSorteo.cargo);
+
+          // Si el cargo no existía en necesidades de este proceso, registrarlo automáticamente
+          const existsInNec = necesidades.some(n => normalizeCargoName(n.cargo) === normCargo);
+          if (!existsInNec) {
+              await supabase.from('personal_necesidades').insert([{
+                  proceso_id: selectedSorteoProceso,
+                  cargo: normCargo,
+                  cantidad_requerida: newSorteo.condicion_sorteo === 'Titular' ? 1 : 0
+              }]);
+              fetchNecesidades(selectedSorteoProceso);
+          }
+
           const { error } = await supabase.from('personal_sorteos').insert([{
               proceso_id: selectedSorteoProceso,
-              dni: newSorteo.dni,
-              nombres: newSorteo.nombres.toUpperCase(),
-              cargo: newSorteo.cargo.toUpperCase(),
+              dni: newSorteo.dni.trim(),
+              nombres: newSorteo.nombres.trim().toUpperCase(),
+              cargo: normCargo,
               condicion_sorteo: newSorteo.condicion_sorteo,
-              email_personal: newSorteo.email_personal,
-              telefono: newSorteo.telefono,
+              email_personal: newSorteo.email_personal.trim(),
+              telefono: newSorteo.telefono.trim(),
               estado_confirmacion: 'Pendiente'
           }]);
           if (error) throw error;
@@ -602,10 +738,10 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           // Sincronizar correo y teléfono en la tabla directorio si existen
           if (newSorteo.email_personal || newSorteo.telefono) {
               const updateData: any = {};
-              if (newSorteo.email_personal) updateData.correo = newSorteo.email_personal;
-              if (newSorteo.telefono) updateData.telefono = newSorteo.telefono;
+              if (newSorteo.email_personal) updateData.correo = newSorteo.email_personal.trim();
+              if (newSorteo.telefono) updateData.telefono = newSorteo.telefono.trim();
               
-              await supabase.from('personal_directorio').update(updateData).eq('dni', newSorteo.dni);
+              await supabase.from('personal_directorio').update(updateData).eq('dni', newSorteo.dni.trim());
           }
 
           notify('Personal añadido manualmente', 'success');
@@ -617,7 +753,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       } finally {
           setLoading(false);
       }
-  }
+  };
 
   // == Autocomplete logic ==
   const searchDirectorioAutocomplete = async (term: string) => {
@@ -705,7 +841,8 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const sorteoDashboardStats = useMemo(() => {
       if (!selectedSorteoProceso) return [];
       return necesidades.map(nec => {
-          const matchingSorteos = sorteos.filter(s => s.cargo === nec.cargo);
+          const normNecCargo = normalizeCargoName(nec.cargo);
+          const matchingSorteos = sorteos.filter(s => normalizeCargoName(s.cargo) === normNecCargo);
           const confirmados = matchingSorteos.filter(s => s.estado_confirmacion === 'Confirmado').length;
           
           const pendientes = matchingSorteos.filter(s => 
@@ -1176,53 +1313,164 @@ UNSAAC`);
              {showNewProceso && (
                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-6 animate-in slide-in-from-top-4">
                     <h4 className="font-bold text-slate-900">Crear Cuadro de Necesidades</h4>
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="flex flex-col gap-2">
                            <label className="text-xs font-bold text-slate-700">Nombre del Proceso</label>
-                           <input type="text" value={newProcesoName} onChange={e => setNewProcesoName(e.target.value.toUpperCase())} className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="Ej. EXAMEN ORDINARIO 2026-I" />
-    </div>
+                           <input type="text" value={newProcesoName} onChange={e => setNewProcesoName(e.target.value.toUpperCase())} className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="Ej. PERSONAL SIMULACRO 2026-II" />
+                        </div>
+
                         <div className="flex flex-col gap-2">
-                           <label className="text-xs font-bold text-slate-700">Modalidad Asociada</label>
-                           <select value={newProcesoModalidad} onChange={e => setNewProcesoModalidad(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none">
-                               <option value="">-- Seleccionar --</option>
-                               {modalidades.map(m => (
-                                   <option key={m.id} value={m.id}>{m.nombre} ({m.cv_cuadros_anuales?.anio})</option>
-                               ))}
-                           </select>
-    </div>
-    </div>
+                           <label className="text-xs font-bold text-slate-700">Origen del Asociado</label>
+                           <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 gap-1">
+                               <button
+                                   type="button"
+                                   onClick={() => setAsociadoTipo('modalidad')}
+                                   className={`flex-1 py-2 px-3 text-xs font-bold rounded-lg transition-all ${asociadoTipo === 'modalidad' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                               >
+                                   Modalidad Oficial
+                               </button>
+                               <button
+                                   type="button"
+                                   onClick={() => setAsociadoTipo('simulacro')}
+                                   className={`flex-1 py-2 px-3 text-xs font-bold rounded-lg transition-all ${asociadoTipo === 'simulacro' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                               >
+                                   Simulacro
+                               </button>
+                               <button
+                                   type="button"
+                                   onClick={() => setAsociadoTipo('libre')}
+                                   className={`flex-1 py-2 px-3 text-xs font-bold rounded-lg transition-all ${asociadoTipo === 'libre' ? 'bg-white text-primary shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                               >
+                                   Asociado Libre
+                               </button>
+                           </div>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        {asociadoTipo === 'modalidad' && (
+                            <div className="flex flex-col gap-1.5 animate-in fade-in">
+                               <label className="text-xs font-bold text-slate-700">Modalidad Oficial Aprobada (Cuadro de Vacantes)</label>
+                               <select value={newProcesoModalidad} onChange={e => setNewProcesoModalidad(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none bg-white">
+                                   <option value="">-- Seleccionar Modalidad --</option>
+                                   {modalidades.map(m => (
+                                       <option key={m.id} value={m.id}>{m.nombre} ({m.cv_cuadros_anuales?.anio})</option>
+                                   ))}
+                               </select>
+                            </div>
+                        )}
+
+                        {asociadoTipo === 'simulacro' && (
+                            <div className="flex flex-col gap-1.5 animate-in fade-in">
+                               <label className="text-xs font-bold text-slate-700">Simulacro Registrado</label>
+                               <select value={newProcesoSimulacro} onChange={e => setNewProcesoSimulacro(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none bg-white">
+                                   <option value="">-- Seleccionar Simulacro --</option>
+                                   {simulacrosList.map(s => (
+                                       <option key={s.id} value={s.id}>{s.nombre} {s.fecha ? `• ${s.fecha}` : ''}</option>
+                                   ))}
+                               </select>
+                            </div>
+                        )}
+
+                        {asociadoTipo === 'libre' && (
+                            <div className="flex flex-col gap-1.5 animate-in fade-in">
+                               <label className="text-xs font-bold text-slate-700">Denominación del Evento Operativo o Jornada</label>
+                               <input 
+                                   type="text" 
+                                   value={newProcesoAsociadoLibre} 
+                                   onChange={e => setNewProcesoAsociadoLibre(e.target.value.toUpperCase())} 
+                                   placeholder="Ej. SIMULACRO 2026 O JORNADA DE CAPACITACIÓN" 
+                                   className="border border-slate-200 rounded-xl p-3 text-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none uppercase font-medium" 
+                               />
+                            </div>
+                        )}
+                    </div>
 
                     <div className="flex flex-col gap-4 mt-2">
                         <div className="flex items-center justify-between">
-                           <label className="text-xs font-bold text-slate-700">Necesidades por Cargo</label>
-                           <button onClick={handleAddNecesidadRow} className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1">
-                               <span className="material-symbols-outlined text-[16px]">add_circle</span> Añadir Cargo
-                           </button>
-    </div>
+                           <div>
+                              <label className="text-xs font-bold text-slate-700">Necesidades por Cargo</label>
+                              <p className="text-[11px] text-slate-400">Selecciona del catálogo o escribe un nuevo cargo exclusivo para este proceso.</p>
+                           </div>
+                           <div className="flex items-center gap-2">
+                               <button type="button" onClick={() => handleAddNecesidadRow(false)} className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1 bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-lg transition-colors">
+                                   <span className="material-symbols-outlined text-[16px]">list</span> Añadir de Lista
+                               </button>
+                               <button type="button" onClick={() => handleAddNecesidadRow(true)} className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors">
+                                   <span className="material-symbols-outlined text-[16px]">add_circle</span> + Nuevo Cargo Libre
+                               </button>
+                           </div>
+                        </div>
                         
                         {newNecesidades.map((n, idx) => (
-                            <div key={idx} className="flex gap-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                <div className="flex-1">
-                                   <select value={n.cargo} onChange={e => handleUpdateNecesidad(idx, 'cargo', e.target.value)} className="w-full text-xs p-2 border border-slate-200 rounded-lg outline-none uppercase font-bold text-slate-700">
-                                       <option value="">-- SELECCIONAR CARGO --</option>
-                                       {dbCargos.map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                                   </select>
-    </div>
-                                <div className="w-32 flex items-center gap-2">
+                            <div key={idx} className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div className="flex-1 flex items-center gap-2">
+                                   {n.isCustom ? (
+                                       <div className="flex-1 flex items-center gap-2">
+                                           <input 
+                                               type="text" 
+                                               value={n.cargo} 
+                                               onChange={e => handleUpdateNecesidad(idx, 'cargo', e.target.value.toUpperCase())} 
+                                               placeholder="ESCRIBA EL NUEVO CARGO (EJ. CONTROLADOR SIMULACRO)..." 
+                                               className="w-full text-xs p-2.5 border border-primary/50 bg-white rounded-lg outline-none uppercase font-bold text-slate-800 placeholder:text-slate-400 focus:ring-1 focus:ring-primary"
+                                           />
+                                           <button 
+                                               type="button" 
+                                               onClick={() => handleUpdateNecesidad(idx, 'isCustom', false)}
+                                               className="p-2 text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-lg shrink-0 text-xs font-medium flex items-center gap-1"
+                                               title="Cambiar a selección de catálogo"
+                                           >
+                                               <span className="material-symbols-outlined text-[16px]">list</span> Elegir de lista
+                                           </button>
+                                       </div>
+                                   ) : (
+                                       <div className="flex-1 flex items-center gap-2">
+                                           <select 
+                                               value={n.cargo} 
+                                               onChange={e => handleUpdateNecesidad(idx, 'cargo', e.target.value)} 
+                                               className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-lg outline-none uppercase font-bold text-slate-700"
+                                           >
+                                               <option value="">-- SELECCIONAR CARGO --</option>
+                                               {availableProcessCargos.map(cName => <option key={cName} value={cName}>{cName}</option>)}
+                                           </select>
+                                           <button 
+                                               type="button" 
+                                               onClick={() => handleUpdateNecesidad(idx, 'isCustom', true)}
+                                               className="p-2 text-primary hover:text-primary/80 bg-white border border-primary/20 rounded-lg shrink-0 text-xs font-bold flex items-center gap-1"
+                                               title="Escribir cargo libre"
+                                           >
+                                               <span className="material-symbols-outlined text-[16px]">edit</span> Escribir cargo nuevo
+                                           </button>
+                                       </div>
+                                   )}
+                                </div>
+                                <div className="w-32 flex items-center gap-2 shrink-0">
                                     <span className="text-xs text-slate-500 font-bold">Cant:</span>
-                                    <input type="number" min="0" value={n.cantidad} onChange={e => handleUpdateNecesidad(idx, 'cantidad', parseInt(e.target.value)||0)} className="w-20 text-xs p-2 border border-slate-200 rounded-lg outline-none text-right font-mono" />
-    </div>
-                                <button onClick={() => handleDeleteNecesidad(idx)} className="text-red-400 hover:text-red-600 p-1">
+                                    <input type="number" min="0" value={n.cantidad} onChange={e => handleUpdateNecesidad(idx, 'cantidad', parseInt(e.target.value)||0)} className="w-20 text-xs p-2 border border-slate-200 bg-white rounded-lg outline-none text-right font-mono font-bold" />
+                                </div>
+                                <button type="button" onClick={() => handleDeleteNecesidad(idx)} className="text-red-400 hover:text-red-600 p-1.5 shrink-0 transition-colors">
                                     <span className="material-symbols-outlined">delete</span>
                                 </button>
-    </div>
+                            </div>
                         ))}
-    </div>
 
-                    <div className="flex justify-end mt-4">
-                        <button onClick={handleSaveProceso} className="bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95">Guardar Proceso</button>
-    </div>
-    </div>
+                        {newNecesidades.length === 0 && (
+                            <p className="text-xs text-slate-400 italic text-center py-3 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                No has agregado requerimientos. Puedes pulsar "Añadir de Lista" o "+ Nuevo Cargo Libre".
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+                        <button type="button" onClick={() => setShowNewProceso(false)} className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors">
+                            Cancelar
+                        </button>
+                        <button type="button" onClick={handleSaveProceso} className="bg-slate-900 hover:bg-black text-white px-6 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95">
+                            Guardar Proceso
+                        </button>
+                    </div>
+                 </div>
              )}
 
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1234,7 +1482,7 @@ UNSAAC`);
     </div>
                         <div>
                            <h4 className="font-black text-slate-800 text-sm leading-tight">{proc.nombre}</h4>
-                           <p className="text-xs text-slate-500 font-medium mt-1 truncate">{(proc as any).modalidad?.nombre || 'General'}</p>
+                           <p className="text-xs text-slate-500 font-medium mt-1 truncate">{(proc as any).modalidad?.nombre || (proc as any).simulacro?.nombre || proc.asociado_custom || 'General'}</p>
     </div>
     </div>
                  ))}
@@ -1301,38 +1549,111 @@ UNSAAC`);
                     </table>
                 ) : (
                     <div className="p-6 flex flex-col gap-4">
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                            <span className="text-xs font-bold text-slate-500">Filas de Requerimiento:</span>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    type="button" 
+                                    onClick={() => setEditNecesidadesRows([...editNecesidadesRows, { cargo: availableProcessCargos[0] || (dbCargos[0]?.nombre || ''), cantidad: 0, isCustom: false }])} 
+                                    className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1 bg-primary/10 px-3 py-1.5 rounded-lg"
+                                >
+                                    <span className="material-symbols-outlined text-[16px]">list</span> Añadir de Lista
+                                </button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setEditNecesidadesRows([...editNecesidadesRows, { cargo: '', cantidad: 0, isCustom: true }])} 
+                                    className="text-xs font-bold text-slate-700 hover:text-slate-900 flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-lg"
+                                >
+                                    <span className="material-symbols-outlined text-[16px]">add_circle</span> + Nuevo Cargo Libre
+                                </button>
+                            </div>
+                        </div>
+
                         {editNecesidadesRows.map((n, idx) => (
-                            <div key={idx} className="flex gap-4 items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
-                                <div className="flex-1">
-                                   <select value={n.cargo} onChange={e => {
-                                       const updated = [...editNecesidadesRows];
-                                       updated[idx].cargo = e.target.value;
-                                       setEditNecesidadesRows(updated);
-                                   }} className="w-full text-xs p-2 border border-slate-200 rounded-lg outline-none uppercase font-bold text-slate-700">
-                                       <option value="">-- SELECCIONAR CARGO --</option>
-                                       {dbCargos.map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
-                                   </select>
-    </div>
-                                <div className="w-32 flex items-center gap-2">
+                            <div key={idx} className="flex gap-3 items-center bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                <div className="flex-1 flex items-center gap-2">
+                                   {n.isCustom ? (
+                                       <div className="flex-1 flex items-center gap-2">
+                                           <input 
+                                               type="text" 
+                                               value={n.cargo} 
+                                               onChange={e => {
+                                                   const updated = [...editNecesidadesRows];
+                                                   updated[idx].cargo = e.target.value.toUpperCase();
+                                                   setEditNecesidadesRows(updated);
+                                               }} 
+                                               placeholder="ESCRIBA EL NUEVO CARGO..." 
+                                               className="w-full text-xs p-2.5 border border-primary/50 bg-white rounded-lg outline-none uppercase font-bold text-slate-800 focus:ring-1 focus:ring-primary"
+                                           />
+                                           <button 
+                                               type="button" 
+                                               onClick={() => {
+                                                   const updated = [...editNecesidadesRows];
+                                                   updated[idx].isCustom = false;
+                                                   setEditNecesidadesRows(updated);
+                                               }}
+                                               className="p-2 text-slate-500 hover:text-slate-800 bg-white border border-slate-200 rounded-lg shrink-0 text-xs font-medium flex items-center gap-1"
+                                               title="Cambiar a selección de catálogo"
+                                           >
+                                               <span className="material-symbols-outlined text-[16px]">list</span> Elegir de lista
+                                           </button>
+                                       </div>
+                                   ) : (
+                                       <div className="flex-1 flex items-center gap-2">
+                                           <select 
+                                               value={n.cargo} 
+                                               onChange={e => {
+                                                   const updated = [...editNecesidadesRows];
+                                                   updated[idx].cargo = e.target.value;
+                                                   setEditNecesidadesRows(updated);
+                                               }} 
+                                               className="w-full text-xs p-2.5 border border-slate-200 bg-white rounded-lg outline-none uppercase font-bold text-slate-700"
+                                           >
+                                               <option value="">-- SELECCIONAR CARGO --</option>
+                                               {availableProcessCargos.map(cName => <option key={cName} value={cName}>{cName}</option>)}
+                                           </select>
+                                           <button 
+                                               type="button" 
+                                               onClick={() => {
+                                                   const updated = [...editNecesidadesRows];
+                                                   updated[idx].isCustom = true;
+                                                   setEditNecesidadesRows(updated);
+                                               }}
+                                               className="p-2 text-primary hover:text-primary/80 bg-white border border-primary/20 rounded-lg shrink-0 text-xs font-bold flex items-center gap-1"
+                                               title="Escribir cargo libre"
+                                           >
+                                               <span className="material-symbols-outlined text-[16px]">edit</span> Escribir cargo nuevo
+                                           </button>
+                                       </div>
+                                   )}
+                                </div>
+                                <div className="w-32 flex items-center gap-2 shrink-0">
                                     <span className="text-xs text-slate-500 font-bold">Cant:</span>
-                                    <input type="number" min="0" value={n.cantidad} onChange={e => {
-                                        const updated = [...editNecesidadesRows];
-                                        updated[idx].cantidad = parseInt(e.target.value) || 0;
+                                    <input 
+                                        type="number" 
+                                        min="0" 
+                                        value={n.cantidad} 
+                                        onChange={e => {
+                                            const updated = [...editNecesidadesRows];
+                                            updated[idx].cantidad = parseInt(e.target.value) || 0;
+                                            setEditNecesidadesRows(updated);
+                                        }} 
+                                        className="w-20 text-xs p-2 border border-slate-200 bg-white rounded-lg outline-none text-right font-mono font-bold" 
+                                    />
+                                </div>
+                                <button 
+                                    type="button" 
+                                    onClick={() => {
+                                        const updated = editNecesidadesRows.filter((_, i) => i !== idx);
                                         setEditNecesidadesRows(updated);
-                                    }} className="w-20 text-xs p-2 border border-slate-200 rounded-lg outline-none text-right font-mono" />
-    </div>
-                                <button onClick={() => {
-                                    const updated = editNecesidadesRows.filter((_, i) => i !== idx);
-                                    setEditNecesidadesRows(updated);
-                                }} className="text-red-400 hover:text-red-600 p-1">
+                                    }} 
+                                    className="text-red-400 hover:text-red-600 p-1.5 shrink-0 transition-colors"
+                                >
                                     <span className="material-symbols-outlined">delete</span>
                                 </button>
-    </div>
+                            </div>
                         ))}
-                        <button onClick={() => setEditNecesidadesRows([...editNecesidadesRows, { cargo: '', cantidad: 0 }])} className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1 w-fit mt-2">
-                            <span className="material-symbols-outlined text-[16px]">add_circle</span> Añadir Fila de Cargo
-                        </button>
-    </div>
+                    </div>
                 )}
     </div>
     </div>
@@ -1363,9 +1684,12 @@ UNSAAC`);
     </div>
                       <select value={selectedSorteoProceso} onChange={e => setSelectedSorteoProceso(e.target.value)} className="border-none bg-transparent font-black text-slate-800 text-xs sm:text-sm focus:ring-0 outline-none cursor-pointer p-1 w-full sm:max-w-md truncate appearance-none">
                            <option value="">-- Seleccionar Proceso --</option>
-                           {procesos.map(p => (
-                               <option key={p.id} value={p.id}>{p.nombre}</option>
-                           ))}
+                           {procesos.map(p => {
+                               const sub = (p as any).modalidad?.nombre || (p as any).simulacro?.nombre || p.asociado_custom || '';
+                               return (
+                                   <option key={p.id} value={p.id}>{p.nombre} {sub ? `(${sub})` : ''}</option>
+                               );
+                           })}
                       </select>
     </div>
 
@@ -1511,7 +1835,7 @@ UNSAAC`);
                                  
                                  <select value={newSorteo.cargo} onChange={e=>setNewSorteo({...newSorteo, cargo: e.target.value})} className="border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none uppercase font-bold text-slate-700">
                                        <option value="">-- SELECCIONAR CARGO --</option>
-                                       {dbCargos.map(c => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                                       {availableProcessCargos.map(cName => <option key={cName} value={cName}>{cName}</option>)}
                                  </select>
                                  
                                  <select value={newSorteo.condicion_sorteo} onChange={e=>setNewSorteo({...newSorteo, condicion_sorteo: e.target.value})} className="border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none">
