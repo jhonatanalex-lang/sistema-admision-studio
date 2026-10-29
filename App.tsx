@@ -238,7 +238,7 @@ function App() {
                 <Route path="/" element={<Dashboard user={user} />} />
                 <Route path="/incoming" element={<IncomingFiles user={user} notify={addToast} />} />
                 <Route path="/outgoing" element={<OutgoingFiles user={user} notify={addToast} />} />
-                <Route path="/lookup" element={<StudentLookup user={user} />} />
+                <Route path="/lookup" element={<StudentLookup user={user} notify={addToast} />} />
                 <Route path="/resolutions" element={<Resolutions user={user} />} />
                 <Route path="/payments" element={<TransferRefunds user={user} />} />
                 
@@ -256,7 +256,7 @@ function App() {
                   </>
                 )}
                 {(user.role === 'Administrador' || (user.role === 'Operador' && user.permissions?.includes('view_renuncias'))) && (
-                  <Route path="/resignations" element={<Resignations user={user} />} />
+                  <Route path="/resignations" element={<Resignations user={user} notify={addToast} />} />
                 )}
                 {(user.role === 'Administrador' || (user.role === 'Operador' && user.permissions?.includes('view_reserva'))) && (
                   <Route path="/vacancy" element={<VacancyReservation user={user} notify={addToast} />} />

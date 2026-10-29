@@ -2,6 +2,7 @@ CREATE OR REPLACE FUNCTION public.buscar_postulante_pre_revision(p_termino text)
 RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET statement_timeout = '15s'
 AS $$
 DECLARE
   v_results json;
@@ -21,7 +22,7 @@ BEGIN
     RETURN '[]'::json;
   END IF;
 
-  v_max_files := CASE WHEN v_is_numeric THEN 5 ELSE 3 END;
+  v_max_files := CASE WHEN v_is_numeric THEN 25 ELSE 10 END;
 
   WITH matching_files AS (
     SELECT 
@@ -34,7 +35,7 @@ BEGIN
     FROM public.pre_revision_archivos p
     LEFT JOIN public.cv_modalidades m ON m.id = p.modalidad_id
     LEFT JOIN public.cv_cuadros_anuales ca ON ca.id = m.cuadro_id
-    WHERE p.csv_data LIKE ('%' || v_term || '%')
+    WHERE p.csv_data ILIKE ('%' || v_term || '%')
     LIMIT v_max_files
   ),
   unpacked_rows AS (
@@ -71,7 +72,7 @@ BEGIN
         ELSE
           UPPER(COALESCE(elem->>'nombre', elem->>'Nombre', elem->>'NOMBRE', elem->>'POSTULANTE', '')) LIKE ('%' || UPPER(v_term) || '%')
       END
-    LIMIT 30
+    LIMIT 60
   )
   SELECT json_agg(applicant_obj) INTO v_results FROM matched_applicants;
 
@@ -85,5 +86,3 @@ $$;
 
 -- Permisos de ejecución
 GRANT EXECUTE ON FUNCTION public.buscar_postulante_pre_revision(text) TO anon, authenticated, service_role;
-
-
