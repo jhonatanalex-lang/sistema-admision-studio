@@ -554,10 +554,15 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
             const rawEmail = row['emailpersonal'] || row['EMAILPERSONAL'] || row['email'] || row['correo'] || '';
             const rawTel = row['telefono'] || row['TELEFONO'] || '';
 
+            let cleanDni = String(rawDni).trim().replace(/\D/g, '');
+            if (cleanDni.length > 0 && cleanDni.length < 8) {
+              cleanDni = cleanDni.padStart(8, '0');
+            }
+
             return {
               proceso_id: selectedSorteoProceso,
               cargo: normalizeCargoName(rawCargo),
-              dni: String(rawDni).trim(),
+              dni: cleanDni,
               nombres: String(rawNombres).trim().toUpperCase(),
               condicion_sorteo: String(rawSorteado).trim().toLowerCase().includes('titu') ? 'Titular' : 'Suplente',
               email_personal: String(rawEmail).trim(),
@@ -723,9 +728,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
               fetchNecesidades(selectedSorteoProceso);
           }
 
+          let normDni = newSorteo.dni.trim().replace(/\D/g, '');
+          if (normDni.length > 0 && normDni.length < 8) {
+              normDni = normDni.padStart(8, '0');
+          }
+
           const { error } = await supabase.from('personal_sorteos').insert([{
               proceso_id: selectedSorteoProceso,
-              dni: newSorteo.dni.trim(),
+              dni: normDni,
               nombres: newSorteo.nombres.trim().toUpperCase(),
               cargo: normCargo,
               condicion_sorteo: newSorteo.condicion_sorteo,
