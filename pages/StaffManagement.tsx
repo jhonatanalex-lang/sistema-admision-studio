@@ -106,6 +106,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
   const [sorteoFilters, setSorteoFilters] = useState({ search: '', cargo: '', condicion: '', estado: '' });
 
+  // WhatsApp Notification State
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppTemplate, setWhatsAppTemplate] = useState('');
+  const [whatsAppFechaLimite, setWhatsAppFechaLimite] = useState('');
+  const [whatsAppFechaExamen, setWhatsAppFechaExamen] = useState('');
+  const [whatsAppCurrentIdx, setWhatsAppCurrentIdx] = useState(0);
+
   // Email Notification Modal State
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailTemplate, setEmailTemplate] = useState('');
@@ -869,6 +876,91 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           };
       }).sort((a, b) => a.cargo.localeCompare(b.cargo));
   }, [necesidades, sorteos, selectedSorteoProceso]);
+
+  const getDefaultWhatsAppTemplate = () => {
+      return `🏛️ *UNSAAC - DIRECCIÓN DE ADMISIÓN*
+Estimado(a) *{nombre}*,
+
+Le recordamos que se le ha remitido una convocatoria formal para su designación en el sorteo como *{cargo}* para el *{proceso}*.
+
+📅 *Fecha del Examen:* {fecha_examen}
+⏰ *Fecha Límite:* {fecha_limite}
+
+Por favor, confirme o rechace su participación ingresando al enlace oficial:
+👉 {enlace_confirmacion}
+
+*(O responda directamente con un toque:)*
+✅ *SÍ, CONFIRMO:* {enlace_si}
+❌ *NO PODRÉ:* {enlace_no}
+
+_Si ya respondió a esta solicitud mediante su correo electrónico, por favor ignore este mensaje._`;
+  };
+
+  const buildWhatsAppText = (persona: PersonalSorteo, customTmpl?: string, fExamen?: string, fLimite?: string) => {
+      const resolvePublicUrl = () => {
+          let origin = window.location.origin;
+          if (origin.includes('localhost') && import.meta.env.VITE_API_URL) {
+              origin = import.meta.env.VITE_API_URL;
+          }
+          return origin;
+      };
+
+      const proc = procesos.find(p => p.id === persona.proceso_id || p.id === selectedSorteoProceso);
+      const procNombre = proc?.nombre || 'PROCESO DE ADMISIÓN';
+      const confirmLinkBase = `${resolvePublicUrl()}/#/staff-confirm?id=${persona.id}`;
+      const linkSi = `${confirmLinkBase}&action=confirm`;
+      const linkNo = `${confirmLinkBase}&action=decline`;
+
+      const limVal = fLimite || whatsAppFechaLimite || emailFechaLimite || persona.fecha_limite_confirmacion;
+      const formattedLimite = limVal 
+          ? new Date(limVal).toLocaleString('es-PE', { dateStyle: 'long', timeStyle: 'short' })
+          : 'a la brevedad';
+
+      const examVal = fExamen || whatsAppFechaExamen || emailFechaExamen || 'próximamente';
+      const tmpl = customTmpl || whatsAppTemplate || getDefaultWhatsAppTemplate();
+
+      return tmpl
+          .replace(/{nombre}/g, persona.nombres)
+          .replace(/{cargo}/g, persona.cargo)
+          .replace(/{proceso}/g, procNombre)
+          .replace(/{fecha_examen}/g, examVal)
+          .replace(/{fecha_limite}/g, formattedLimite)
+          .replace(/{enlace_confirmacion}/g, confirmLinkBase)
+          .replace(/{enlace_si}/g, linkSi)
+          .replace(/{enlace_no}/g, linkNo);
+  };
+
+  const openWhatsAppChat = (persona: PersonalSorteo, customTmpl?: string) => {
+      if (!persona.telefono) {
+          notify(`La persona ${persona.nombres} no tiene número de celular registrado.`, 'warning');
+          return;
+      }
+      const rawDigits = String(persona.telefono).replace(/\D/g, '');
+      const cleanPhone = rawDigits.length >= 9 ? rawDigits.slice(-9) : rawDigits;
+      if (cleanPhone.length !== 9 || !cleanPhone.startsWith('9')) {
+          notify(`El número ${persona.telefono} no parece ser un celular válido de 9 dígitos.`, 'warning');
+          return;
+      }
+
+      const msg = buildWhatsAppText(persona, customTmpl);
+      const url = `https://wa.me/51${cleanPhone}?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank');
+  };
+
+  const handleOpenWhatsAppModal = () => {
+      const pendientes = filteredSorteos.filter(s => s.estado_confirmacion === 'Pendiente' && s.telefono);
+      if (pendientes.length === 0) {
+          notify('No hay personas en estado PENDIENTE con celular registrado en la lista visible.', 'info');
+          return;
+      }
+      if (!whatsAppTemplate) {
+          setWhatsAppTemplate(getDefaultWhatsAppTemplate());
+      }
+      if (!whatsAppFechaExamen && emailFechaExamen) setWhatsAppFechaExamen(emailFechaExamen);
+      if (!whatsAppFechaLimite && emailFechaLimite) setWhatsAppFechaLimite(emailFechaLimite);
+      setWhatsAppCurrentIdx(0);
+      setShowWhatsAppModal(true);
+  };
 
   const handleOpenEmailModal = () => {
     const pendientes = filteredSorteos.filter(s => s.estado_confirmacion === 'Pendiente' && s.email_personal && !s.notificado);
@@ -1728,6 +1820,10 @@ UNSAAC`);
                              <span className="material-symbols-outlined text-[16px]">forward_to_inbox</span> Notificar <span className="hidden lg:inline">a Visibles</span>
                           </button>
 
+                           <button onClick={handleOpenWhatsAppModal} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors border border-emerald-600">
+                              <span className="material-symbols-outlined text-[16px]">chat</span> WhatsApp <span className="hidden lg:inline">Recordatorio</span>
+                           </button>
+
                           <button onClick={handleOpenCommModal} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors border border-blue-600">
                              <span className="material-symbols-outlined text-[16px]">campaign</span> Comunicado <span className="hidden lg:inline">a Visibles</span>
                           </button>
@@ -1918,7 +2014,19 @@ UNSAAC`);
                                            </td>
                                            <td className="p-4 text-[10px]">
                                               {s.email_personal && <p className="text-primary truncate max-w-[150px]">{s.email_personal}</p>}
-                                              {s.telefono && <p className="text-slate-500">{s.telefono}</p>}
+                                              {s.telefono && (
+                                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                                      <span className="text-slate-500 font-mono">{s.telefono}</span>
+                                                      <button 
+                                                          type="button"
+                                                          onClick={(e) => { e.stopPropagation(); openWhatsAppChat(s); }} 
+                                                          title="Enviar Recordatorio por WhatsApp" 
+                                                          className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 p-1 rounded transition-colors inline-flex items-center"
+                                                      >
+                                                          <span className="material-symbols-outlined text-[15px]">chat</span>
+                                                      </button>
+                                                  </div>
+                                              )}
                                            </td>
                                        <td className="p-4">
                                            {s.estado_confirmacion === 'Pendiente' && (!s.fecha_limite_confirmacion || new Date(s.fecha_limite_confirmacion).getTime() >= new Date().getTime()) && <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded font-bold text-[10px] uppercase">Pendiente</span>}
@@ -1932,13 +2040,23 @@ UNSAAC`);
                                        </td>
                                            <td className="p-4">
                                                 <div className="flex gap-1 justify-center">
+                                                    {s.telefono && (
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => openWhatsAppChat(s)} 
+                                                            title="Enviar Recordatorio WhatsApp con Enlace Tokenizado" 
+                                                            className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
+                                                        >
+                                                           <span className="material-symbols-outlined text-[16px]">chat</span>
+                                                        </button>
+                                                    )}
                                                     <button onClick={() => confirmParticipant(s.id, 'Confirmado')} title="Confirmar Manual" className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors">
                                                        <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
                                                     </button>
                                                     <button onClick={() => confirmParticipant(s.id, 'Rechazado')} title="Marcar Rechazo" className="p-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors">
                                                        <span className="material-symbols-outlined text-[16px]">person_off</span>
                                                     </button>
-    </div>
+                                                </div>
                                            </td>
                                        </tr>
                                    ))}
@@ -2121,6 +2239,200 @@ UNSAAC`);
     </div>
     </div>
       )}
+
+      {/* WhatsApp Reminder Modal */}
+      {showWhatsAppModal && (() => {
+        const whatsAppPendientes = filteredSorteos.filter(s => s.estado_confirmacion === 'Pendiente' && s.telefono);
+        const currentPerson = whatsAppPendientes[whatsAppCurrentIdx] || whatsAppPendientes[0];
+        const previewMsg = currentPerson ? buildWhatsAppText(currentPerson, whatsAppTemplate, whatsAppFechaExamen, whatsAppFechaLimite) : '';
+
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+                  {/* Modal Header */}
+                  <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-emerald-600 text-white">
+                      <div className="flex items-center gap-2.5">
+                          <span className="material-symbols-outlined text-[24px]">chat</span>
+                          <div>
+                              <h3 className="font-bold text-base leading-tight">Recordatorio de Confirmación por WhatsApp</h3>
+                              <p className="text-xs text-emerald-100 font-medium">Envía mensajes directos con token y enlaces interactivos para postulantes o docentes sorteados.</p>
+                          </div>
+                      </div>
+                      <button onClick={() => setShowWhatsAppModal(false)} className="text-emerald-100 hover:text-white p-1 rounded-lg transition-colors">
+                          <span className="material-symbols-outlined">close</span>
+                      </button>
+                  </div>
+
+                  {/* Modal Body: 2 Columns */}
+                  <div className="p-5 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5">
+                      {/* Left Column: Config & Template (7 cols) */}
+                      <div className="lg:col-span-7 flex flex-col gap-4">
+                          <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded-xl text-xs flex gap-2.5 items-start">
+                              <span className="material-symbols-outlined text-emerald-600 text-[20px] shrink-0">info</span>
+                              <div>
+                                  Se detectaron <strong>{whatsAppPendientes.length}</strong> persona(s) con estado <strong>PENDIENTE</strong> y número de celular registrado. Puedes enviar a cada uno abriendo directamente su chat oficial en WhatsApp con el mensaje pre-llenado.
+                              </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                                      FECHA DEL EXAMEN <span className="text-slate-400 font-normal">(Ej. Domingo 02 de Noviembre)</span>
+                                  </label>
+                                  <input 
+                                      type="text" 
+                                      value={whatsAppFechaExamen} 
+                                      onChange={e => setWhatsAppFechaExamen(e.target.value)} 
+                                      placeholder="Escribe la fecha del evento..."
+                                      className="w-full border border-slate-200 rounded-lg p-2 text-xs outline-none bg-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" 
+                                  />
+                              </div>
+
+                              <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200">
+                                  <label className="block text-xs font-bold text-amber-900 mb-1">
+                                      FECHA Y HORA LÍMITE DE RESPUESTA
+                                  </label>
+                                  <input 
+                                      type="datetime-local" 
+                                      value={whatsAppFechaLimite} 
+                                      onChange={e => setWhatsAppFechaLimite(e.target.value)} 
+                                      className="w-full border border-amber-200 rounded-lg p-2 text-xs outline-none bg-white focus:border-amber-500 focus:ring-1 focus:ring-amber-500" 
+                                  />
+                              </div>
+                          </div>
+
+                          <div>
+                              <div className="flex items-center justify-between mb-1">
+                                  <label className="text-xs font-bold text-slate-700">PLANTILLA DEL MENSAJE DE WHATSAPP</label>
+                                  <button 
+                                      type="button" 
+                                      onClick={() => setWhatsAppTemplate(getDefaultWhatsAppTemplate())} 
+                                      className="text-[11px] font-bold text-emerald-700 hover:underline flex items-center gap-0.5"
+                                  >
+                                      <span className="material-symbols-outlined text-[13px]">refresh</span> Restaurar Predeterminada
+                                  </button>
+                              </div>
+
+                              <div className="text-[11px] text-slate-500 mb-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200 leading-relaxed">
+                                  <span className="font-bold text-slate-700">Etiquetas disponibles:</span> <br/>
+                                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 mt-1 font-mono text-[10px]">
+                                      <span><code>{'{nombre}'}</code> : Nombre completo</span>
+                                      <span><code>{'{cargo}'}</code> : Cargo asignado</span>
+                                      <span><code>{'{proceso}'}</code> : Nombre del proceso</span>
+                                      <span><code>{'{fecha_examen}'}</code> : Fecha examen</span>
+                                      <span><code>{'{fecha_limite}'}</code> : Fecha y hora límite</span>
+                                      <span><code>{'{enlace_confirmacion}'}</code> : Link a pantalla móvil</span>
+                                      <span><code>{'{enlace_si}'}</code> : Link directo de confirmación</span>
+                                      <span><code>{'{enlace_no}'}</code> : Link directo de rechazo</span>
+                                  </div>
+                                  <p className="mt-1.5 text-slate-400 text-[10px]">Formato WhatsApp: Usa <code>*texto*</code> para negrita y <code>_texto_</code> para cursiva.</p>
+                              </div>
+
+                              <textarea 
+                                  value={whatsAppTemplate} 
+                                  onChange={e => setWhatsAppTemplate(e.target.value)} 
+                                  rows={11}
+                                  className="w-full border border-slate-200 rounded-xl p-3 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-mono bg-slate-50/50"
+                              ></textarea>
+                          </div>
+                      </div>
+
+                      {/* Right Column: Interactive WhatsApp Preview & Queue (5 cols) */}
+                      <div className="lg:col-span-5 flex flex-col gap-4 border-t lg:border-t-0 lg:border-l lg:border-slate-200 lg:pl-5">
+                          {/* Queue navigation */}
+                          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col gap-2">
+                              <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                                  <span>Cola de Pendientes ({whatsAppPendientes.length})</span>
+                                  <span className="text-emerald-700 font-mono">{whatsAppPendientes.length > 0 ? `${whatsAppCurrentIdx + 1} de ${whatsAppPendientes.length}` : '0 de 0'}</span>
+                              </div>
+
+                              {whatsAppPendientes.length > 0 && currentPerson && (
+                                  <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                                      <p className="font-bold text-xs text-slate-900 leading-tight truncate">{currentPerson.nombres}</p>
+                                      <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1 font-mono">
+                                          <span>DNI: {currentPerson.dni}</span>
+                                          <span className="text-emerald-700 font-bold flex items-center gap-0.5">
+                                              <span className="material-symbols-outlined text-[13px]">phone_iphone</span>
+                                              {currentPerson.telefono}
+                                          </span>
+                                      </div>
+                                      <p className="text-[10px] text-slate-400 uppercase mt-0.5 font-bold truncate">{currentPerson.cargo}</p>
+                                  </div>
+                              )}
+
+                              <div className="flex gap-2 items-center">
+                                  <button 
+                                      type="button"
+                                      disabled={whatsAppCurrentIdx <= 0}
+                                      onClick={() => setWhatsAppCurrentIdx(prev => Math.max(0, prev - 1))}
+                                      className="flex-1 py-1.5 px-2 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 rounded-lg text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1"
+                                  >
+                                      <span className="material-symbols-outlined text-[16px]">arrow_back</span> Anterior
+                                  </button>
+                                  <button 
+                                      type="button"
+                                      disabled={whatsAppCurrentIdx >= whatsAppPendientes.length - 1}
+                                      onClick={() => setWhatsAppCurrentIdx(prev => Math.min(whatsAppPendientes.length - 1, prev + 1))}
+                                      className="flex-1 py-1.5 px-2 bg-white border border-slate-200 hover:bg-slate-100 disabled:opacity-40 rounded-lg text-xs font-bold text-slate-700 transition-colors flex items-center justify-center gap-1"
+                                  >
+                                      Siguiente <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                                  </button>
+                              </div>
+                          </div>
+
+                          {/* Quick launcher button for current person */}
+                          {currentPerson && (
+                              <button 
+                                  type="button"
+                                  onClick={() => {
+                                      openWhatsAppChat(currentPerson, whatsAppTemplate);
+                                      if (whatsAppCurrentIdx < whatsAppPendientes.length - 1) {
+                                          setWhatsAppCurrentIdx(prev => prev + 1);
+                                      }
+                                  }}
+                                  className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-3 px-4 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 border-b-2 border-emerald-800"
+                              >
+                                  <span className="material-symbols-outlined text-[18px]">chat</span>
+                                  <span>Abrir WhatsApp de {currentPerson.nombres.split(' ')[0]}</span>
+                                  <span className="material-symbols-outlined text-[16px] ml-auto">open_in_new</span>
+                              </button>
+                          )}
+
+                          {/* WhatsApp Chat Bubble Preview */}
+                          <div className="flex-1 flex flex-col">
+                              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[14px] text-emerald-600">visibility</span> Vista Previa en WhatsApp
+                              </label>
+                              <div className="bg-[#efeae2] p-3 rounded-2xl border border-slate-200 flex-1 overflow-y-auto max-h-[320px] flex flex-col justify-end">
+                                  <div className="bg-[#dcf8c6] text-slate-800 text-xs p-3 rounded-xl rounded-tr-none shadow-sm border border-[#c7ecb6] leading-relaxed whitespace-pre-wrap font-sans">
+                                      {previewMsg || 'No hay destinatarios pendientes seleccionados.'}
+                                      <div className="text-[9px] text-slate-500 text-right mt-1.5 flex items-center justify-end gap-1">
+                                          <span>10:30 AM</span>
+                                          <span className="material-symbols-outlined text-[12px] text-blue-500">done_all</span>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
+                      <p className="text-xs text-slate-500 font-medium">
+                          Al presionar "Abrir WhatsApp", se abrirá una nueva pestaña con el chat oficial pre-cargado.
+                      </p>
+                      <button 
+                          type="button"
+                          onClick={() => setShowWhatsAppModal(false)} 
+                          className="px-6 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 transition-colors shadow-sm"
+                      >
+                          Cerrar
+                      </button>
+                  </div>
+              </div>
+          </div>
+        );
+      })()}
 
       {/* Communication Modal */}
       {showCommModal && (
