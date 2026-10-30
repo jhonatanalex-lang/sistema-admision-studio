@@ -584,6 +584,33 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
               return;
           }
 
+          // 1. Deduplicar internamente en el CSV por DNI
+          const seenCsvDnis = new Set<string>();
+          const dedupedCsvRecords: any[] = [];
+          for (const r of validRecords) {
+              if (!seenCsvDnis.has(r.dni)) {
+                  seenCsvDnis.add(r.dni);
+                  dedupedCsvRecords.push(r);
+              }
+          }
+
+          // 2. Consultar DNIs que ya están sorteados en este proceso para no duplicar
+          const { data: existingSorteosData } = await supabase
+              .from('personal_sorteos')
+              .select('dni')
+              .eq('proceso_id', selectedSorteoProceso);
+
+          const existingDniSet = new Set((existingSorteosData || []).map((s: any) => s.dni));
+          const newRecordsToInsert = dedupedCsvRecords.filter(r => !existingDniSet.has(r.dni));
+          const omittedCount = validRecords.length - newRecordsToInsert.length;
+
+          if (newRecordsToInsert.length === 0) {
+              notify(`Todos los registros (${validRecords.length}) ya se encuentran registrados en este proceso. No se crearon duplicados.`, 'info');
+              setLoading(false);
+              if (sortFileInput.current) sortFileInput.current.value = '';
+              return;
+          }
+
           // Auto-registro inteligente de cargos no contemplados previamente en el proceso
           const { data: currentNec } = await supabase
               .from('personal_necesidades')
@@ -595,13 +622,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
 
           // Agrupar titulares por cargo para cantidad base
           const titularesCountByCargo = new Map<string, number>();
-          validRecords.forEach(r => {
+          newRecordsToInsert.forEach(r => {
               if (r.condicion_sorteo === 'Titular') {
                   titularesCountByCargo.set(r.cargo, (titularesCountByCargo.get(r.cargo) || 0) + 1);
               }
           });
 
-          const uniqueCargosInCSV = Array.from(new Set(validRecords.map(r => r.cargo)));
+          const uniqueCargosInCSV = Array.from(new Set(newRecordsToInsert.map(r => r.cargo)));
           const missingCargos = uniqueCargosInCSV.filter(c => !existingMap.has(c));
 
           let newCargosAdded = 0;
@@ -615,11 +642,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
               if (!necInsErr) newCargosAdded = necToInsert.length;
           }
 
-          const { error } = await supabase.from('personal_sorteos').insert(validRecords);
+          const { error } = await supabase.from('personal_sorteos').insert(newRecordsToInsert);
           if (error) throw error;
           
           // Sincronizar directorio
-          const recordsToSync = validRecords.filter(r => r.email_personal || r.telefono);
+          const recordsToSync = newRecordsToInsert.filter(r => r.email_personal || r.telefono);
           if (recordsToSync.length > 0) {
               const syncPromises = recordsToSync.map(r => {
                   const updateData: any = {};
@@ -630,9 +657,13 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
               await Promise.allSettled(syncPromises);
           }
 
-          const msg = newCargosAdded > 0 
-            ? `Importados ${validRecords.length} sorteados exitosamente. Se incorporaron ${newCargosAdded} cargo(s) nuevo(s) al cuadro de necesidades.`
-            : `Importados ${validRecords.length} sorteados exitosamente.`;
+          let msg = `Importados ${newRecordsToInsert.length} sorteados nuevos exitosamente.`;
+          if (omittedCount > 0) {
+              msg += ` (Se omitieron ${omittedCount} registros duplicados o ya existentes en este proceso).`;
+          }
+          if (newCargosAdded > 0) {
+              msg += ` Se incorporaron ${newCargosAdded} cargo(s) nuevo(s) al cuadro de necesidades.`;
+          }
           notify(msg, 'success');
           
           fetchSorteos(selectedSorteoProceso);
@@ -738,6 +769,20 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           let normDni = newSorteo.dni.trim().replace(/\D/g, '');
           if (normDni.length > 0 && normDni.length < 8) {
               normDni = normDni.padStart(8, '0');
+          }
+
+          // Verificar si ya está registrado en este proceso
+          const { data: existingDniCheck } = await supabase
+              .from('personal_sorteos')
+              .select('id')
+              .eq('proceso_id', selectedSorteoProceso)
+              .eq('dni', normDni)
+              .maybeSingle();
+
+          if (existingDniCheck) {
+              notify(`El DNI ${normDni} ya se encuentra registrado en este proceso de sorteo.`, 'error');
+              setLoading(false);
+              return;
           }
 
           const { error } = await supabase.from('personal_sorteos').insert([{
