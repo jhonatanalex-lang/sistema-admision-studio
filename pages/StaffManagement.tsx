@@ -878,22 +878,18 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   }, [necesidades, sorteos, selectedSorteoProceso]);
 
   const getDefaultWhatsAppTemplate = () => {
-      return `🏛️ *UNSAAC - DIRECCIÓN DE ADMISIÓN*
+      return `*UNSAAC - DIRECCIÓN DE ADMISIÓN*
 Estimado(a) *{nombre}*,
 
 Le recordamos que se le ha remitido una convocatoria formal para su designación en el sorteo como *{cargo}* para el *{proceso}*.
 
-📅 *Fecha del Examen:* {fecha_examen}
-⏰ *Fecha Límite:* {fecha_limite}
+- *Fecha del Examen:* {fecha_examen}
+- *Fecha y Hora Límite:* {fecha_limite}
+- *Correo remitido:* {correo}
 
-Por favor, confirme o rechace su participación ingresando al enlace oficial:
-👉 {enlace_confirmacion}
+Por favor, revise su bandeja de entrada (o carpeta de no deseados/spam) y confirme o decline su disponibilidad respondiendo a través de los botones oficiales incluidos en dicho correo electrónico.
 
-*(O responda directamente con un toque:)*
-✅ *SÍ, CONFIRMO:* {enlace_si}
-❌ *NO PODRÉ:* {enlace_no}
-
-_Si ya respondió a esta solicitud mediante su correo electrónico, por favor ignore este mensaje._`;
+_Si ya respondió a esta convocatoria mediante su correo electrónico, por favor ignore este mensaje._`;
   };
 
   const buildWhatsAppText = (persona: PersonalSorteo, customTmpl?: string, fExamen?: string, fLimite?: string) => {
@@ -907,9 +903,7 @@ _Si ya respondió a esta solicitud mediante su correo electrónico, por favor ig
 
       const proc = procesos.find(p => p.id === persona.proceso_id || p.id === selectedSorteoProceso);
       const procNombre = proc?.nombre || 'PROCESO DE ADMISIÓN';
-      const confirmLinkBase = `${resolvePublicUrl()}/#/staff-confirm?id=${persona.id}`;
-      const linkSi = `${confirmLinkBase}&action=confirm`;
-      const linkNo = `${confirmLinkBase}&action=decline`;
+      const userEmail = persona.email_personal || 'su correo registrado';
 
       const limVal = fLimite || whatsAppFechaLimite || emailFechaLimite || persona.fecha_limite_confirmacion;
       const formattedLimite = limVal 
@@ -925,9 +919,10 @@ _Si ya respondió a esta solicitud mediante su correo electrónico, por favor ig
           .replace(/{proceso}/g, procNombre)
           .replace(/{fecha_examen}/g, examVal)
           .replace(/{fecha_limite}/g, formattedLimite)
-          .replace(/{enlace_confirmacion}/g, confirmLinkBase)
-          .replace(/{enlace_si}/g, linkSi)
-          .replace(/{enlace_no}/g, linkNo);
+          .replace(/{correo}/g, userEmail)
+          .replace(/{enlace_confirmacion}/g, '')
+          .replace(/{enlace_si}/g, '')
+          .replace(/{enlace_no}/g, '');
   };
 
   const openWhatsAppChat = (persona: PersonalSorteo, customTmpl?: string) => {
@@ -2255,7 +2250,7 @@ UNSAAC`);
                           <span className="material-symbols-outlined text-[24px]">chat</span>
                           <div>
                               <h3 className="font-bold text-base leading-tight">Recordatorio de Confirmación por WhatsApp</h3>
-                              <p className="text-xs text-emerald-100 font-medium">Envía mensajes directos con token y enlaces interactivos para postulantes o docentes sorteados.</p>
+                              <p className="text-xs text-emerald-100 font-medium">Envía recordatorios oficiales indicando al personal revisar su correo para confirmar su participación.</p>
                           </div>
                       </div>
                       <button onClick={() => setShowWhatsAppModal(false)} className="text-emerald-100 hover:text-white p-1 rounded-lg transition-colors">
@@ -2319,11 +2314,9 @@ UNSAAC`);
                                       <span><code>{'{nombre}'}</code> : Nombre completo</span>
                                       <span><code>{'{cargo}'}</code> : Cargo asignado</span>
                                       <span><code>{'{proceso}'}</code> : Nombre del proceso</span>
-                                      <span><code>{'{fecha_examen}'}</code> : Fecha examen</span>
+                                      <span><code>{'{correo}'}</code> : Correo del destinatario</span>
+                                      <span><code>{'{fecha_examen}'}</code> : Fecha del examen</span>
                                       <span><code>{'{fecha_limite}'}</code> : Fecha y hora límite</span>
-                                      <span><code>{'{enlace_confirmacion}'}</code> : Link a pantalla móvil</span>
-                                      <span><code>{'{enlace_si}'}</code> : Link directo de confirmación</span>
-                                      <span><code>{'{enlace_no}'}</code> : Link directo de rechazo</span>
                                   </div>
                                   <p className="mt-1.5 text-slate-400 text-[10px]">Formato WhatsApp: Usa <code>*texto*</code> para negrita y <code>_texto_</code> para cursiva.</p>
                               </div>
