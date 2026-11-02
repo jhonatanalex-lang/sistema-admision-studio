@@ -335,116 +335,74 @@ const searchPreRevisionApplicants = async (rawTerm: string): Promise<any[]> => {
     if (!isNumeric && term.length < 3) return [];
 
     try {
-        const batches = await getPreRevisionBatchIndex();
-        if (batches.length === 0) return [];
+        let q = supabase
+            .from('postulaciones')
+            .select('*');
 
-        const batchMap = new Map<string, PreRevisionBatchMeta>();
-        batches.forEach(b => batchMap.set(b.id, b));
-
-        const searchWords = isNumeric
-            ? [term]
-            : term
-                .split(/[\s,\-/]+/)
-                .map(w => w.trim())
-                .filter(w => w.length >= 2);
-
-        if (searchWords.length === 0) return [];
-
-        const buildFilterQuery = (ids: string[]) => {
-            let q = supabase.from('pre_revision_archivos').select('id').in('id', ids);
-            if (isNumeric) {
-                // LIKE (case-sensitive) es mucho más rápido que ILIKE para dígitos en columnas TOAST grandes
-                q = q.like('csv_data', `%${term}%`);
-            } else {
-                searchWords.forEach(word => {
-                    const agnostic = word.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
-                    q = q.ilike('csv_data', `%${agnostic}%`);
-                });
-            }
-            return q;
-        };
-
-        // Escanear los lotes en bloques de 6 con concurrencia máxima de 3 para no saturar vCPU de Postgres ni disparar 57014
-        const CHUNK_SIZE = 6;
-        const chunks: string[][] = [];
-        const allIds = batches.map(b => b.id);
-        for (let i = 0; i < allIds.length; i += CHUNK_SIZE) {
-            chunks.push(allIds.slice(i, i + CHUNK_SIZE));
+        if (isNumeric) {
+            let cleanDni = term.replace(/\D/g, '');
+            if (cleanDni.length > 0 && cleanDni.length < 8) cleanDni = cleanDni.padStart(8, '0');
+            q = q.eq('dni', cleanDni);
+        } else {
+            const words = term.split(/[\s,\-/]+/).map(w => w.trim()).filter(w => w.length >= 2);
+            words.forEach(w => {
+                const agnostic = w.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
+                q = q.ilike('nombres', `%${agnostic}%`);
+            });
+            q = q.limit(60);
         }
 
-        const matchedBatchIds = new Set<string>();
-        await runWithConcurrency(chunks, 3, async chunkIds => {
-            const { data, error } = await buildFilterQuery(chunkIds);
-            if (!error && data) {
-                data.forEach((row: any) => {
-                    if (row?.id) matchedBatchIds.add(String(row.id));
-                });
-            } else if (error) {
-                // Fallback individual con concurrencia controlada si un lote pesado demoró el bloque
-                await runWithConcurrency(chunkIds, 2, async singleId => {
-                    const { data: singleData } = await buildFilterQuery([singleId]);
-                    if (singleData && singleData.length > 0) {
-                        matchedBatchIds.add(singleId);
-                    }
-                });
-            }
-        });
+        const { data, error } = await q;
+        if (error) {
+            console.error('Error en consulta rápida public.postulaciones:', error);
+            return [];
+        }
 
-        if (matchedBatchIds.size === 0) return [];
-
-        const targetIds = Array.from(matchedBatchIds);
-        const normalizedWords = isNumeric ? [] : searchWords.map(normalizeForSearch).filter(Boolean);
-        const matchedApplicants: any[] = [];
-
-        await runWithConcurrency(targetIds, 2, async batchId => {
-            if (!isNumeric && matchedApplicants.length >= 60) return;
-            const meta = batchMap.get(batchId);
-            const rows = await fetchBatchRowsById(batchId);
-            for (let i = 0; i < rows.length; i++) {
-                const elem = rows[i];
-                if (!elem || typeof elem !== 'object') continue;
-
-                if (isNumeric) {
-                    const docNum = String(
-                        elem.NroDocumento ??
-                        elem.alumno ??
-                        elem.dni ??
-                        elem.DNI ??
-                        elem.CODPOSTULANTE ??
-                        elem.DOCUMENTO ??
-                        ''
-                    ).trim();
-                    if (docNum !== term) continue;
-                } else {
-                    const rawCandidateName = String(
-                        elem.nombre ??
-                        elem.Nombre ??
-                        elem.NOMBRE ??
-                        elem.POSTULANTE ??
-                        ''
-                    );
-                    if (!rawCandidateName) continue;
-                    const normCandidateName = normalizeForSearch(rawCandidateName);
-                    const allWordsMatch = normalizedWords.every(w => normCandidateName.includes(w));
-                    if (!allWordsMatch) continue;
-                }
-
-                matchedApplicants.push({
-                    ...elem,
-                    _preRevisionId: batchId,
-                    _modalidadId: meta?.modalidad_id || '',
-                    _modalidadNombre: meta?.modalidadNombre || '',
-                    _semestre: meta?.semestre || '',
-                    _anio: meta?.anio || ''
-                });
-
-                if (!isNumeric && matchedApplicants.length >= 60) break;
-            }
-        });
-
-        return matchedApplicants;
+        return (data || []).map((p: any) => ({
+            ...p,
+            NroDocumento: p.dni,
+            alumno: p.dni,
+            dni: p.dni,
+            DNI: p.dni,
+            CODPOSTULANTE: p.dni,
+            nombre: p.nombres,
+            Nombre: p.nombres,
+            NOMBRE: p.nombres,
+            POSTULANTE: p.nombres,
+            carrera_nombre: p.carrera_nombre,
+            carrera_codigo: p.carrera_codigo,
+            Escuela1: p.carrera_codigo,
+            CarreraIngreso: p.carrera_codigo,
+            Escuela2: p.segunda_opcion_codigo,
+            'Carrera 1': p.carrera_nombre,
+            'Carrera 2': p.segunda_opcion_codigo,
+            Nota: p.nota !== null ? String(p.nota) : '',
+            POS: p.orden_merito !== null ? String(p.orden_merito) : '',
+            PUESTO: p.orden_merito !== null ? String(p.orden_merito) : '',
+            OBSERVACION: p.condicion,
+            observacion: p.condicion,
+            condicion: p.condicion,
+            Condicion: p.condicion,
+            ESTADO: p.condicion,
+            grupo: p.grupo,
+            email: p.email,
+            telefono: p.telefono,
+            colegio: p.colegio_codigo,
+            nombrecolegio: p.colegio_nombre,
+            PromedioColegio: p.promedio_colegio !== null ? String(p.promedio_colegio) : '',
+            FechaNacimiento: p.fecha_nacimiento,
+            LugarNacimiento: p.ubigeo_nacimiento,
+            Ubigeo_Domicilio_Actual: p.ubigeo_domicilio,
+            Direccion: p.direccion,
+            Discapacidad: p.discapacidad,
+            _modalidadId: p.modalidad_id,
+            _modalidadNombre: p.modalidad_nombre || p.proceso_nombre,
+            _semestre: p.semestre,
+            _anio: p.semestre ? p.semestre.split('-')[0] : '',
+            _preRevisionId: p.lote_id
+        }));
     } catch (err) {
-        console.error('Error en búsqueda multi-lote pre_revision_archivos:', err);
+        console.error('Error en búsqueda de postulaciones:', err);
         return [];
     }
 };
