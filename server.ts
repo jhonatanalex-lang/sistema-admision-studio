@@ -818,23 +818,147 @@ async function startServer() {
     }
   });
 
-  // --- 6. PRE-REVISION ENDPOINTS (Bypass RLS) ---
+  // --- 6. PRE-REVISION ENDPOINTS (Bypass RLS & AutoSync con public.postulaciones) ---
+  async function syncLoteToPostulaciones(supabase: any, modalidadId: string, rawData: any, loteId?: string) {
+    try {
+      let rows: any[] = [];
+      if (Array.isArray(rawData)) rows = rawData;
+      else if (typeof rawData === 'string') {
+        try {
+          const p = JSON.parse(rawData);
+          rows = Array.isArray(p) ? p : (p.postulantes || p.data || p.rows || []);
+        } catch (e) { return; }
+      } else if (typeof rawData === 'object' && rawData) {
+        rows = rawData.postulantes || rawData.data || rawData.rows || [];
+      }
+
+      if (!rows || rows.length === 0) return;
+
+      const [{ data: mod }, { data: escuelas }] = await Promise.all([
+        supabase.from('cv_modalidades').select('id, nombre, semestre').eq('id', modalidadId).maybeSingle(),
+        supabase.from('cv_escuelas').select('codigo_carrera, nombre')
+      ]);
+
+      const escuelasMap = new Map<string, string>();
+      (escuelas || []).forEach((e: any) => {
+        if (e.codigo_carrera) escuelasMap.set(String(e.codigo_carrera).trim(), e.nombre);
+      });
+
+      const modNombre = mod?.nombre || 'PROCESO DE ADMISIÓN';
+      const semestre = mod?.semestre || null;
+
+      const records: any[] = [];
+      for (const r of rows) {
+        const rawDni = r.NroDocumento || r.alumno || r.dni || r.DNI || r.CODPOSTULANTE || '';
+        let cleanDni = String(rawDni).trim().replace(/\D/g, '');
+        if (cleanDni.length > 0 && cleanDni.length < 8) cleanDni = cleanDni.padStart(8, '0');
+        if (!cleanDni) continue;
+
+        const rawNombre = r.nombre || r.NOMBRES || r.postulante || r.apellidos_nombres || '';
+        if (!rawNombre) continue;
+
+        const rawCodCarrera = String(r.CarreraIngreso || r.Escuela1 || r.carrera || r.COD_CARRERA || '').trim();
+        const rawCarreraNombre = r.carrera_nombre || r['Carrera 1'] || r.Carrera1 || r.Carrera || r.CARRERA || escuelasMap.get(rawCodCarrera) || null;
+        const rawCodOp2 = String(r.Escuela2 || r.carrera2 || r['Carrera 2'] || '').trim() || null;
+
+        let notaNum = null;
+        const rawNota = r.Nota || r.nota || r.Puntaje || r.puntaje || r.NOTA;
+        if (rawNota !== undefined && rawNota !== null && rawNota !== '') {
+          const parsedN = parseFloat(String(rawNota).replace(',', '.'));
+          if (!isNaN(parsedN)) notaNum = parsedN;
+        }
+
+        let ordenMeritoNum = null;
+        const rawMerito = r.POS || r.pos || r.PUESTO || r.puesto || r.OMERITO || r.omerito;
+        if (rawMerito !== undefined && rawMerito !== null && rawMerito !== '') {
+          const parsedM = parseInt(String(rawMerito).replace(/\D/g, ''), 10);
+          if (!isNaN(parsedM)) ordenMeritoNum = parsedM;
+        }
+
+        let cond = String(r.OBSERVACION || r.observacion || r.condicion || r.Condicion || r.ESTADO || '').trim().toUpperCase();
+        if (!cond) {
+          if (r.es_ingresante === true || r.admitido === true) cond = 'INGRESANTE';
+          else cond = 'PARTICIPANTE';
+        }
+
+        let fNac = null;
+        const rawFnac = r.FechaNacimiento || r.fecha_nacimiento;
+        if (rawFnac && /^\d{4}-\d{2}-\d{2}$/.test(String(rawFnac).trim())) {
+          fNac = String(rawFnac).trim();
+        }
+
+        let promCol = null;
+        if (r.PromedioColegio) {
+          const p = parseFloat(String(r.PromedioColegio).replace(',', '.'));
+          if (!isNaN(p) && p > 0) promCol = p;
+        }
+
+        records.push({
+          lote_id: loteId || null,
+          modalidad_id: modalidadId,
+          proceso_nombre: r.nombremodalidad || modNombre,
+          modalidad_nombre: modNombre,
+          semestre: semestre,
+          dni: cleanDni,
+          tipo_documento: String(r.TipoDocumentoIdentidad || 'DNI').trim(),
+          nombres: String(rawNombre).trim().toUpperCase(),
+          sexo: String(r.Sexo || r.sexo || '').trim() || null,
+          fecha_nacimiento: fNac,
+          carrera_codigo: rawCodCarrera || null,
+          carrera_nombre: rawCarreraNombre || null,
+          segunda_opcion_codigo: rawCodOp2,
+          grupo: String(r.grupo || r.Grupo || '').trim() || null,
+          nota: notaNum,
+          orden_merito: ordenMeritoNum,
+          condicion: cond,
+          email: String(r.email || r.correo || '').trim() || null,
+          telefono: String(r.telefono || r.celular || '').trim() || null,
+          colegio_codigo: String(r.colegio || r.codigo_colegio || '').trim() || null,
+          colegio_nombre: String(r.nombrecolegio || r.colegio_nombre || '').trim() || null,
+          promedio_colegio: promCol,
+          ubigeo_nacimiento: String(r.LugarNacimiento || '').trim() || null,
+          ubigeo_domicilio: String(r.Ubigeo_Domicilio_Actual || '').trim() || null,
+          direccion: String(r.Direccion || '').trim() || null,
+          discapacidad: String(r.Discapacidad || '').trim() || null
+        });
+      }
+
+      await supabase.from('postulaciones').delete().eq('modalidad_id', modalidadId);
+
+      const CHUNK_SIZE = 500;
+      for (let c = 0; c < records.length; c += CHUNK_SIZE) {
+        const chunk = records.slice(c, c + CHUNK_SIZE);
+        await supabase.from('postulaciones').insert(chunk);
+      }
+
+      console.log(`[AutoSync] Sincronizados exitosamente ${records.length} postulantes en public.postulaciones para modalidad ${modalidadId}`);
+    } catch (err: any) {
+      console.error("[AutoSync] Error al sincronizar con postulaciones:", err.message);
+    }
+  }
+
   app.post("/api/save-pre-revision", express.json({ limit: "50mb" }), async (req, res) => {
     try {
       const { modalidad_id, csv_data } = req.body;
       if (!modalidad_id) return res.status(400).json({ error: "modalidad_id is required" });
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       await supabase.from('pre_revision_archivos').delete().eq('modalidad_id', modalidad_id);
-      const { error } = await supabase.from('pre_revision_archivos').insert({
+      const { data: newBatch, error } = await supabase.from('pre_revision_archivos').insert({
         modalidad_id,
         csv_data
-      });
+      }).select().single();
 
       if (error) throw error;
+
+      // Disparar sincronización automática en background a public.postulaciones
+      syncLoteToPostulaciones(supabase, modalidad_id, csv_data, newBatch?.id).catch(err => {
+        console.error("Error en sincronización background postulaciones:", err);
+      });
+
       res.json({ success: true });
     } catch (error: any) {
       console.error("Save Pre-Revision Error:", error);
