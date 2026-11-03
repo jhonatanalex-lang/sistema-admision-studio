@@ -115,6 +115,56 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
   const [searchQuery, setSearchQuery] = useState('');
   const [currentFilter, setCurrentFilter] = useState('Todos');
   const [isPendingReportOpen, setIsPendingReportOpen] = useState(false);
+  const [copiedFileId, setCopiedFileId] = useState<string | null>(null);
+
+  const fallbackCopyText = (text: string, cb?: () => void) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      if (cb) cb();
+    } catch (err) {
+      console.error('Error al copiar al portapapeles:', err);
+    }
+    document.body.removeChild(textarea);
+  };
+
+  const handleCopyOutgoingSummary = (file: GroupedOutgoingFile) => {
+    const docText = file.docNumber ? `${file.docType || 'Documento'} ${file.docNumber}` : (file.docType || 'Documento');
+    const expText = file.refNumber && file.refNumber !== '-' ? file.refNumber : 'S/N';
+    const pdfLink = file.pdfUrl ? (isGoogleDriveUrl(file.pdfUrl) ? formatDriveViewUrl(file.pdfUrl) : file.pdfUrl) : null;
+
+    const lines = [
+      '📤 *EXPEDIENTE DE SALIDA*',
+      `• *Expediente:* ${expText}`,
+      `• *Documento:* ${docText}`,
+      `• *Fecha de Emisión:* ${file.dateTime}`,
+      `• *Destino:* ${file.destination || '-'}`,
+      `• *Asunto:* ${file.subject}`,
+      pdfLink ? `• *Documento PDF:* ${pdfLink}` : null
+    ].filter(Boolean);
+
+    const textToCopy = lines.join('\n');
+
+    const onSuccess = () => {
+      setCopiedFileId(file.id);
+      setTimeout(() => setCopiedFileId(null), 2000);
+      if (notify) notify('Datos del expediente copiados para WhatsApp', 'success');
+      else setActionFeedback({ message: 'Datos del expediente copiados para WhatsApp', type: 'success' });
+    };
+
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(textToCopy).then(onSuccess).catch(() => {
+        fallbackCopyText(textToCopy, onSuccess);
+      });
+    } else {
+      fallbackCopyText(textToCopy, onSuccess);
+    }
+  };
 
   useEffect(() => {
     syncDriveConfigWithServer().then(cfg => {
@@ -1137,6 +1187,25 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                                             <option value="Archivado" className="bg-white text-slate-900">ARCHIVADO</option>
                                         </select>
 
+                                        {/* Botón muy casual de copiar para WhatsApp */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleCopyOutgoingSummary(file);
+                                            }}
+                                            className={`size-8 rounded-lg flex items-center justify-center transition-all ${
+                                                copiedFileId === file.id
+                                                    ? 'bg-emerald-100 text-emerald-700 font-bold scale-105'
+                                                    : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600 active:scale-95'
+                                            }`}
+                                            title={copiedFileId === file.id ? "¡Copiado!" : "Copiar datos para WhatsApp"}
+                                        >
+                                            <span className="material-symbols-outlined text-[17px]">
+                                                {copiedFileId === file.id ? 'check' : 'content_copy'}
+                                            </span>
+                                        </button>
+
                                         {/* Botón 3 puntos */}
                                         <button
                                             onClick={(e) => {
@@ -1155,6 +1224,12 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                                                 onClick={(e) => e.stopPropagation()} 
                                                 className="absolute right-0 top-9 mt-1 w-52 bg-white rounded-2xl shadow-2xl border border-slate-200 py-1.5 z-50 text-left animate-in fade-in zoom-in-95"
                                             >
+                                                <button 
+                                                    onClick={() => { handleCopyOutgoingSummary(file); setActiveMenuId(null); }}
+                                                    className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
+                                                >
+                                                    <span className="material-symbols-outlined text-[17px] text-slate-500">content_copy</span> Copiar Resumen (WhatsApp)
+                                                </button>
                                                 <button 
                                                     onClick={() => { handleOpenTracking(file); setActiveMenuId(null); }}
                                                     className="w-full text-left px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5"
@@ -1298,18 +1373,45 @@ export const OutgoingFiles: React.FC<{ user: User; notify?: (message: string, ty
                                         </select>
                                     </td>
                                     <td className="px-6 py-4 text-right pr-10 relative">
-                                        <button 
-                                            onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === file.id ? null : file.id); }}
-                                            className="size-8 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center transition-colors ml-auto"
-                                            title="Opciones"
-                                        >
-                                            <span className="material-symbols-outlined text-lg">more_vert</span>
-                                        </button>
+                                        <div className="flex items-center justify-end gap-1">
+                                            {/* Botón muy casual de copiar para WhatsApp */}
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleCopyOutgoingSummary(file);
+                                                }}
+                                                className={`size-8 rounded-full flex items-center justify-center transition-all ${
+                                                    copiedFileId === file.id
+                                                        ? 'bg-emerald-50 text-emerald-600 scale-105'
+                                                        : 'hover:bg-slate-100 text-slate-400 hover:text-slate-600 active:scale-95'
+                                                }`}
+                                                title={copiedFileId === file.id ? "¡Copiado!" : "Copiar datos para WhatsApp"}
+                                            >
+                                                <span className="material-symbols-outlined text-[17px]">
+                                                    {copiedFileId === file.id ? 'check' : 'content_copy'}
+                                                </span>
+                                            </button>
+
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === file.id ? null : file.id); }}
+                                                className="size-8 rounded-full hover:bg-slate-200 text-slate-400 flex items-center justify-center transition-colors"
+                                                title="Opciones"
+                                            >
+                                                <span className="material-symbols-outlined text-lg">more_vert</span>
+                                            </button>
+                                        </div>
                                         {activeMenuId === file.id && (
                                             <div 
                                                 onClick={(e) => e.stopPropagation()}
                                                 className="absolute right-10 top-10 mt-1 w-48 bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 text-left"
                                             >
+                                                <button 
+                                                    onClick={(e) => { e.stopPropagation(); handleCopyOutgoingSummary(file); setActiveMenuId(null); }}
+                                                    className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                                >
+                                                    <span className="material-symbols-outlined text-[16px] text-slate-500">content_copy</span> Copiar Resumen (WhatsApp)
+                                                </button>
                                                 <button 
                                                     onClick={(e) => { e.stopPropagation(); handleOpenTracking(file); setActiveMenuId(null); }}
                                                     className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2"

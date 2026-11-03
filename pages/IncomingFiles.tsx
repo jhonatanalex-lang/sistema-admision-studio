@@ -191,6 +191,58 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
 
   // Operators & Assignment State
   const [operators, setOperators] = useState<any[]>([]);
+  const [copiedFileId, setCopiedFileId] = useState<string | null>(null);
+
+  const fallbackCopyText = (text: string, cb?: () => void) => {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      if (cb) cb();
+    } catch (err) {
+      console.error('Error al copiar al portapapeles:', err);
+    }
+    document.body.removeChild(textarea);
+  };
+
+  const handleCopyIncomingSummary = (file: GroupedIncomingFile) => {
+    const assignedUser = file.assigned_to ? operators.find(op => op.id === file.assigned_to) : null;
+    const outDoc = file.outgoingDoc?.doc_number 
+      ? `${file.outgoingDoc.doc_type || 'Documento'} ${file.outgoingDoc.doc_number}` 
+      : null;
+    const pdfLink = file.outgoingDoc?.pdf_url || null;
+
+    const lines = [
+      '📥 *EXPEDIENTE ENTRANTE*',
+      `• *Nº Expediente:* ${file.number}`,
+      `• *Asunto:* ${file.subject}`,
+      `• *Fecha / Ingreso:* ${file.dateTime}`,
+      `• *Estado:* ${file.status || 'Pendiente'}`,
+      assignedUser ? `• *Asignado a:* ${assignedUser.name}` : null,
+      outDoc ? `• *Documento de Salida:* ${outDoc}` : null,
+      pdfLink ? `• *Enlace PDF:* ${pdfLink}` : null
+    ].filter(Boolean);
+
+    const textToCopy = lines.join('\n');
+
+    const onSuccess = () => {
+      setCopiedFileId(file.id);
+      setTimeout(() => setCopiedFileId(null), 2000);
+      if (notify) notify(`Expediente Nº ${file.number} copiado para WhatsApp`, 'success');
+    };
+
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(textToCopy).then(onSuccess).catch(() => {
+        fallbackCopyText(textToCopy, onSuccess);
+      });
+    } else {
+      fallbackCopyText(textToCopy, onSuccess);
+    }
+  };
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
   const [fileToAssign, setFileToAssign] = useState<GroupedIncomingFile | null>(null);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
@@ -4307,6 +4359,22 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                     </td>
                                     <td className="px-6 py-5 text-right pr-10">
                                         <div className="flex items-center justify-end gap-2">
+                                            {/* Botón muy casual de copiar para WhatsApp */}
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); handleCopyIncomingSummary(file); }}
+                                                className={`size-8 rounded-full flex items-center justify-center transition-all ${
+                                                    copiedFileId === file.id
+                                                        ? 'bg-emerald-50 text-emerald-600 scale-105'
+                                                        : 'hover:bg-slate-200 text-slate-400 hover:text-slate-600 active:scale-95'
+                                                }`}
+                                                title={copiedFileId === file.id ? "¡Copiado!" : "Copiar datos para WhatsApp"}
+                                            >
+                                                <span className="material-symbols-outlined text-[17px]">
+                                                    {copiedFileId === file.id ? 'check' : 'content_copy'}
+                                                </span>
+                                            </button>
+
                                             {(file.count > 1 || file.status === 'Atendido') && (
                                                 <button onClick={() => { setUnifiedTimelineExpediente({ refNumber: file.number }); }} className="size-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors" title="Ver Historial">
                                                     <span className="material-symbols-outlined text-sm">history</span>
@@ -4351,7 +4419,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                     <span className="material-symbols-outlined text-lg">more_vert</span>
                                                 </button>
                                                 {activeMenuId === file.id && (
-                                                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50">
+                                                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-slate-100 py-1 z-50 text-left">
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); handleCopyIncomingSummary(file); setActiveMenuId(null); }}
+                                                            className="w-full text-left px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                                        >
+                                                            <span className="material-symbols-outlined text-[16px] text-slate-500">content_copy</span> Copiar Resumen (WhatsApp)
+                                                        </button>
                                                         {(user.role === 'Administrador' || user.role === 'Director') && (
                                                             <button 
                                                                 onClick={(e) => { e.stopPropagation(); setFileToAssign(file); setSelectedOperatorId(file.assigned_to || ''); setAssignmentNotes(file.assignment_notes || ''); setAssignmentType(file.assignment_type || 'action'); setIsAssignModalOpen(true); setActiveMenuId(null); }}
