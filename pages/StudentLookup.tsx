@@ -213,6 +213,117 @@ let preRevisionIndexCache: { fetchedAt: number; batches: PreRevisionBatchMeta[] 
 const parsedBatchRowsCache = new Map<string, { fetchedAt: number; rows: any[] }>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// Proyecciones de columnas livianas para búsquedas ultra-rápidas (<300ms) evitando JSONB y timeouts 57014
+export const POSTULACIONES_LIGHT_COLS = 'id, lote_id, modalidad_id, proceso_nombre, modalidad_nombre, semestre, dni, tipo_documento, nombres, sexo, fecha_nacimiento, carrera_codigo, carrera_nombre, segunda_opcion_codigo, grupo, nota, orden_merito, condicion, email, telefono, colegio_codigo, colegio_nombre, promedio_colegio, ubigeo_nacimiento, ubigeo_domicilio, direccion, discapacidad';
+export const PARTICIPANTES_LIGHT_COLS = 'id, CODPOSTULANTE, NOMBRE, CARRERA, FILIAL, MODALIDAD, SEMESTRE, ANIO, NOTA, OMERITO, FECHAINGRESO, codigo_carrera, telefono, email, direccion, colegio, promedio_colegio, ubigeo, fecha_nacimiento, sexo, discapacidad, nota_examen_anulado, resolucion_anulacion, fecha_examen_anulado';
+export const EXAMENES_ANULADOS_LIGHT_COLS = 'id, dni, nombre_completo, carrera_nombre, codigo_carrera, carrera_ingreso_reprogramado, nota_reprogramado, nota_anulada, omerito_reprogramado, omerito_anulado, condicion_final, ingresante_reprogramado, modalidad_id, modalidad_origen, semestre, anio, resolucion_anulacion, motivo_anulacion, fecha_examen_anulado, ingresante_anulado, fecha_segundo_examen';
+
+// Stop words / partículas que no aportan selectividad a los índices GIN de nombres
+export const STOP_WORDS = new Set([
+    'DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y', 'E', 'SAN', 'SANTA', 'AL', 'O', 'U',
+    'DA', 'DO', 'DOS', 'DAS', 'DI', 'VON', 'VAN', 'MC', 'MAC'
+]);
+
+// Normaliza vocales eliminando tildes y diacríticos, conservando la letra Ñ intacta
+export const stripVowelAccents = (str: string): string => {
+    return (str || '')
+        .replace(/[ÁÀÄÂ]/gi, 'A')
+        .replace(/[ÉÈËÊ]/gi, 'E')
+        .replace(/[ÍÌÏÎ]/gi, 'I')
+        .replace(/[ÓÒÖÔ]/gi, 'O')
+        .replace(/[ÚÙÜÛ]/gi, 'U')
+        .toUpperCase();
+};
+
+// Extrae palabras significativas ordenadas por peso consonántico y longitud para maximizar selectividad en índices GIN
+export const getPrioritizedSearchWords = (rawTerm: string): { prioritized: string[]; allWords: string[] } => {
+    const clean = stripVowelAccents(rawTerm)
+        .replace(/[^A-Z0-9Ñ\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    
+    const allWords = clean.split(' ').filter(w => w.length >= 2);
+    if (allWords.length === 0) return { prioritized: [], allWords: [] };
+
+    // Filtramos partículas triviales para priorizar términos determinantes
+    const meaningful = allWords.filter(w => !STOP_WORDS.has(w) && w.length >= 3);
+    const candidates = meaningful.length > 0 ? meaningful : allWords;
+
+    // Ponderación: 2 puntos por consonante (incluida Ñ) + 1 punto por longitud total
+    const scored = candidates.map(word => {
+        const consonants = (word.match(/[^AEIOU]/g) || []).length;
+        const score = consonants * 2 + word.length;
+        return { word, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return {
+        prioritized: scored.map(s => s.word),
+        allWords
+    };
+};
+
+// Verificación exhaustiva en memoria de todos los términos con tolerancia a Ñ/N
+export const matchesAllTermsInMemory = (fullName: string | undefined | null, searchWords: string[]): boolean => {
+    if (!fullName) return false;
+    const normName = stripVowelAccents(fullName)
+        .replace(/[^A-Z0-9Ñ\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const normNameNoEnie = normName.replace(/Ñ/g, 'N');
+
+    return searchWords.every(word => {
+        if (normName.includes(word)) return true;
+        const wordNoEnie = word.replace(/Ñ/g, 'N');
+        if (normNameNoEnie.includes(wordNoEnie)) return true;
+        return false;
+    });
+};
+
+const mapPostulacionRow = (p: any) => ({
+    ...p,
+    NroDocumento: p.dni,
+    alumno: p.dni,
+    dni: p.dni,
+    DNI: p.dni,
+    CODPOSTULANTE: p.dni,
+    nombre: p.nombres,
+    Nombre: p.nombres,
+    NOMBRE: p.nombres,
+    POSTULANTE: p.nombres,
+    carrera_nombre: p.carrera_nombre,
+    carrera_codigo: p.carrera_codigo,
+    Escuela1: p.carrera_codigo,
+    CarreraIngreso: p.carrera_codigo,
+    Escuela2: p.segunda_opcion_codigo,
+    'Carrera 1': p.carrera_nombre,
+    'Carrera 2': p.segunda_opcion_codigo,
+    Nota: p.nota !== null ? String(p.nota) : '',
+    POS: p.orden_merito !== null ? String(p.orden_merito) : '',
+    PUESTO: p.orden_merito !== null ? String(p.orden_merito) : '',
+    OBSERVACION: p.condicion,
+    observacion: p.condicion,
+    condicion: p.condicion,
+    Condicion: p.condicion,
+    ESTADO: p.condicion,
+    grupo: p.grupo,
+    email: p.email,
+    telefono: p.telefono,
+    colegio: p.colegio_codigo,
+    nombrecolegio: p.colegio_nombre,
+    PromedioColegio: p.promedio_colegio !== null ? String(p.promedio_colegio) : '',
+    FechaNacimiento: p.fecha_nacimiento,
+    LugarNacimiento: p.ubigeo_nacimiento,
+    Ubigeo_Domicilio_Actual: p.ubigeo_domicilio,
+    Direccion: p.direccion,
+    Discapacidad: p.discapacidad,
+    _modalidadId: p.modalidad_id,
+    _modalidadNombre: p.modalidad_nombre || p.proceso_nombre,
+    _semestre: p.semestre,
+    _anio: p.semestre ? p.semestre.split('-')[0] : '',
+    _preRevisionId: p.lote_id
+});
+
 const normalizeForSearch = (val: string): string =>
     val
         .normalize('NFD')
@@ -328,7 +439,7 @@ const runWithConcurrency = async <T,>(
     );
 };
 
-const searchPreRevisionApplicants = async (rawTerm: string): Promise<any[]> => {
+const searchPreRevisionApplicants = async (rawTerm: string, signal?: AbortSignal): Promise<any[]> => {
     const term = rawTerm.trim();
     if (!term) return [];
     const isNumeric = /^\d+$/.test(term);
@@ -337,99 +448,158 @@ const searchPreRevisionApplicants = async (rawTerm: string): Promise<any[]> => {
     try {
         let q = supabase
             .from('postulaciones')
-            .select('*');
+            .select(POSTULACIONES_LIGHT_COLS);
+        if (signal) q = q.abortSignal(signal);
+
+        let prioritizedWords: string[] = [];
+        let allWords: string[] = [];
 
         if (isNumeric) {
             let cleanDni = term.replace(/\D/g, '');
             if (cleanDni.length > 0 && cleanDni.length < 8) cleanDni = cleanDni.padStart(8, '0');
-            q = q.eq('dni', cleanDni);
+            q = q.eq('dni', cleanDni).limit(50);
         } else {
-            const words = term.split(/[\s,\-/]+/).map(w => w.trim()).filter(w => w.length >= 2);
-            words.forEach(w => {
-                const agnostic = w.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
-                q = q.ilike('nombres', `%${agnostic}%`);
+            const parsed = getPrioritizedSearchWords(term);
+            prioritizedWords = parsed.prioritized;
+            allWords = parsed.allWords;
+            if (prioritizedWords.length === 0) return [];
+
+            // Usamos las 1 o 2 palabras de mayor peso consonántico para un Bitmap Index Scan instantáneo (<200ms)
+            const topWords = prioritizedWords.slice(0, 2);
+            topWords.forEach(w => {
+                q = q.like('nombres', `%${w}%`);
             });
-            q = q.limit(60);
+            q = q.limit(80);
         }
 
-        const { data, error } = await q;
+        let { data, error } = await q;
+
+        // Reintento inmediato de respaldo ante código 57014 (statement timeout en caché fría)
+        if (error && (error as any).code === '57014') {
+            console.warn('Timeout 57014 en public.postulaciones ante caché fría. Ejecutando reintento inmediato de respaldo...');
+            const fallbackWord = prioritizedWords[0] || (isNumeric ? term : '');
+            if (fallbackWord) {
+                let retryQ = supabase
+                    .from('postulaciones')
+                    .select(POSTULACIONES_LIGHT_COLS);
+                if (signal) retryQ = retryQ.abortSignal(signal);
+                if (isNumeric) {
+                    retryQ = retryQ.eq('dni', fallbackWord).limit(30);
+                } else {
+                    retryQ = retryQ.like('nombres', `%${fallbackWord}%`).limit(40);
+                }
+                const retryRes = await retryQ;
+                if (!retryRes.error && retryRes.data) {
+                    data = retryRes.data;
+                    error = null;
+                }
+            }
+        }
+
         if (error) {
+            if (signal?.aborted || (error as any).message?.includes('AbortError')) return [];
             console.error('Error en consulta rápida public.postulaciones:', error);
             return [];
         }
 
-        return (data || []).map((p: any) => ({
-            ...p,
-            NroDocumento: p.dni,
-            alumno: p.dni,
-            dni: p.dni,
-            DNI: p.dni,
-            CODPOSTULANTE: p.dni,
-            nombre: p.nombres,
-            Nombre: p.nombres,
-            NOMBRE: p.nombres,
-            POSTULANTE: p.nombres,
-            carrera_nombre: p.carrera_nombre,
-            carrera_codigo: p.carrera_codigo,
-            Escuela1: p.carrera_codigo,
-            CarreraIngreso: p.carrera_codigo,
-            Escuela2: p.segunda_opcion_codigo,
-            'Carrera 1': p.carrera_nombre,
-            'Carrera 2': p.segunda_opcion_codigo,
-            Nota: p.nota !== null ? String(p.nota) : '',
-            POS: p.orden_merito !== null ? String(p.orden_merito) : '',
-            PUESTO: p.orden_merito !== null ? String(p.orden_merito) : '',
-            OBSERVACION: p.condicion,
-            observacion: p.condicion,
-            condicion: p.condicion,
-            Condicion: p.condicion,
-            ESTADO: p.condicion,
-            grupo: p.grupo,
-            email: p.email,
-            telefono: p.telefono,
-            colegio: p.colegio_codigo,
-            nombrecolegio: p.colegio_nombre,
-            PromedioColegio: p.promedio_colegio !== null ? String(p.promedio_colegio) : '',
-            FechaNacimiento: p.fecha_nacimiento,
-            LugarNacimiento: p.ubigeo_nacimiento,
-            Ubigeo_Domicilio_Actual: p.ubigeo_domicilio,
-            Direccion: p.direccion,
-            Discapacidad: p.discapacidad,
-            _modalidadId: p.modalidad_id,
-            _modalidadNombre: p.modalidad_nombre || p.proceso_nombre,
-            _semestre: p.semestre,
-            _anio: p.semestre ? p.semestre.split('-')[0] : '',
-            _preRevisionId: p.lote_id
-        }));
-    } catch (err) {
+        // Si la búsqueda con palabras que tienen N arrojó 0 resultados, probar variante con Ñ
+        if (!isNumeric && (!data || data.length === 0) && prioritizedWords.some(w => w.includes('N') && !w.includes('Ñ'))) {
+            const topWordsWithEnie = prioritizedWords.slice(0, 2).map(w => w.replace(/N/g, 'Ñ'));
+            let variantQ = supabase
+                .from('postulaciones')
+                .select(POSTULACIONES_LIGHT_COLS);
+            if (signal) variantQ = variantQ.abortSignal(signal);
+            topWordsWithEnie.forEach(w => {
+                variantQ = variantQ.like('nombres', `%${w}%`);
+            });
+            variantQ = variantQ.limit(80);
+            const varRes = await variantQ;
+            if (varRes.data && varRes.data.length > 0) {
+                data = varRes.data;
+            }
+        }
+
+        if (!data || data.length === 0) return [];
+
+        // En búsquedas por texto, verificamos en memoria que TODOS los términos ingresados coincidan
+        const validRows = isNumeric
+            ? data
+            : data.filter((p: any) => matchesAllTermsInMemory(p.nombres, allWords));
+
+        return validRows.map(mapPostulacionRow);
+    } catch (err: any) {
+        if (signal?.aborted || err?.name === 'AbortError' || err?.message?.includes('AbortError')) {
+            return [];
+        }
         console.error('Error en búsqueda de postulaciones:', err);
         return [];
     }
 };
 
-const fetchAnnulledExamApplicants = async (rawTerm: string): Promise<any[]> => {
+const fetchAnnulledExamApplicants = async (rawTerm: string, signal?: AbortSignal): Promise<any[]> => {
     const term = rawTerm.trim();
     if (!term) return [];
     const isNumeric = /^\d+$/.test(term);
     if (!isNumeric && term.length < 3) return [];
 
     try {
-        let q = supabase.from('postulantes_examenes_anulados').select('*');
+        let q = supabase.from('postulantes_examenes_anulados').select(EXAMENES_ANULADOS_LIGHT_COLS);
+        if (signal) q = q.abortSignal(signal);
+
+        let allWords: string[] = [];
+
         if (isNumeric) {
-            q = q.eq('dni', term).limit(20);
+            let cleanDni = term.replace(/\D/g, '');
+            if (cleanDni.length > 0 && cleanDni.length < 8) cleanDni = cleanDni.padStart(8, '0');
+            q = q.eq('dni', cleanDni).limit(20);
         } else {
-            const words = term.split(/[\s,\-/]+/).filter(Boolean);
-            words.forEach(word => {
-                const agnostic = word.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
-                q = q.ilike('nombre_completo', `%${agnostic}%`);
+            const parsed = getPrioritizedSearchWords(term);
+            const prioritized = parsed.prioritized;
+            allWords = parsed.allWords;
+            if (prioritized.length === 0) return [];
+
+            const topWords = prioritized.slice(0, 2);
+            topWords.forEach(w => {
+                q = q.like('nombre_completo', `%${w}%`);
             });
-            q = q.limit(30);
+            q = q.limit(40);
         }
 
-        const { data, error } = await q;
-        if (error || !data) return [];
+        let { data, error } = await q;
 
-        return data.map((row: any) => {
+        // Reintento ante 57014
+        if (error && (error as any).code === '57014') {
+            console.warn('Timeout 57014 en postulantes_examenes_anulados. Reintentando...');
+            const fallbackWord = isNumeric ? term : (getPrioritizedSearchWords(term).prioritized[0] || '');
+            if (fallbackWord) {
+                let retryQ = supabase.from('postulantes_examenes_anulados').select(EXAMENES_ANULADOS_LIGHT_COLS);
+                if (signal) retryQ = retryQ.abortSignal(signal);
+                if (isNumeric) {
+                    retryQ = retryQ.eq('dni', fallbackWord).limit(10);
+                } else {
+                    retryQ = retryQ.like('nombre_completo', `%${fallbackWord}%`).limit(20);
+                }
+                const retryRes = await retryQ;
+                if (!retryRes.error && retryRes.data) {
+                    data = retryRes.data;
+                    error = null;
+                }
+            }
+        }
+
+        if (error) {
+            if (signal?.aborted || (error as any).message?.includes('AbortError')) return [];
+            console.debug('Aviso consultando postulantes_examenes_anulados:', error);
+            return [];
+        }
+
+        if (!data || data.length === 0) return [];
+
+        const validRows = isNumeric
+            ? data
+            : data.filter((row: any) => matchesAllTermsInMemory(row.nombre_completo, allWords));
+
+        return validRows.map((row: any) => {
             const admittedDefinitive = row.ingresante_reprogramado === 1 || row.ingresante_reprogramado === '1' || row.ingresante_reprogramado === true;
             const condicionDefinitiva = String(
                 row.condicion_final || (admittedDefinitive ? 'INGRESANTE' : 'NO INGRESA (EXAMEN REPROGRAMADO)')
@@ -463,7 +633,10 @@ const fetchAnnulledExamApplicants = async (rawTerm: string): Promise<any[]> => {
                 }
             };
         });
-    } catch (err) {
+    } catch (err: any) {
+        if (signal?.aborted || err?.name === 'AbortError' || err?.message?.includes('AbortError')) {
+            return [];
+        }
         console.debug('Aviso consultando postulantes_examenes_anulados:', err);
         return [];
     }
@@ -660,6 +833,7 @@ export const StudentLookup: React.FC<{ user: User; notify?: (message: string, ty
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchStatusText, setBatchStatusText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const searchAbortControllerRef = useRef<AbortController | null>(null);
 
   // Import State
   const [importData, setImportData] = useState<any[]>([]);
@@ -693,6 +867,14 @@ export const StudentLookup: React.FC<{ user: User; notify?: (message: string, ty
       notify(msg, type);
     }
   }, [notify]);
+
+  useEffect(() => {
+    return () => {
+      if (searchAbortControllerRef.current) {
+        searchAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -984,6 +1166,15 @@ export const StudentLookup: React.FC<{ user: User; notify?: (message: string, ty
   const handleSearch = async (overrideQuery?: string) => {
     const rawTerm = typeof overrideQuery === 'string' ? overrideQuery : searchQuery;
     if (!rawTerm.trim()) return;
+
+    // Cancelar cualquier búsqueda previa en vuelo para no saturar PostgreSQL
+    if (searchAbortControllerRef.current) {
+      searchAbortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    searchAbortControllerRef.current = abortController;
+    const signal = abortController.signal;
+
     setLoading(true); 
     setError(null); 
     setSelectedProfile(null);
@@ -995,30 +1186,72 @@ export const StudentLookup: React.FC<{ user: User; notify?: (message: string, ty
       setLastSearchedTerm(term);
       const isNumeric = /^\d+$/.test(term);
       
-      // 1. Layer 1: Query 'participantes' (Ingresantes oficiales)
-      let partQuery = supabase.from('participantes').select('*');
+      // 1. Layer 1: Query 'participantes' (Ingresantes oficiales) con proyección liviana y GIN index
+      let partQuery = supabase
+        .from('participantes')
+        .select(PARTICIPANTES_LIGHT_COLS)
+        .abortSignal(signal);
+
+      let partAllWords: string[] = [];
+      let partPrioritizedWords: string[] = [];
+
       if (isNumeric) {
-          partQuery = partQuery.eq('CODPOSTULANTE', term).limit(50);
+          let cleanDni = term.replace(/\D/g, '');
+          if (cleanDni.length > 0 && cleanDni.length < 8) cleanDni = cleanDni.padStart(8, '0');
+          partQuery = partQuery.eq('CODPOSTULANTE', cleanDni).limit(50);
       } else {
-          const words = term.split(/[\s,\-/]+/).filter(Boolean);
-          words.forEach(word => {
-            const agnostic = word.replace(/[aeiouáéíóúüAEIOUÁÉÍÓÚÜ]/g, '_');
-            partQuery = partQuery.ilike('NOMBRE', `%${agnostic}%`);
-          });
-          partQuery = partQuery.limit(60);
+          const parsed = getPrioritizedSearchWords(term);
+          partPrioritizedWords = parsed.prioritized;
+          partAllWords = parsed.allWords;
+          if (partPrioritizedWords.length > 0) {
+              const topPartWords = partPrioritizedWords.slice(0, 2);
+              topPartWords.forEach(word => {
+                  partQuery = partQuery.like('NOMBRE', `%${word}%`);
+              });
+          }
+          partQuery = partQuery.limit(80);
       }
 
       // 1, 2 & 3: Ejecutar en paralelo Ingresantes oficiales, Lotes de Pre-Revisión (sin timeout 57014) y Exámenes Anulados
       const [partRes, preData, annulledData] = await Promise.all([
           partQuery.order('ANIO', { ascending: false }).order('SEMESTRE', { ascending: false }),
-          searchPreRevisionApplicants(term),
-          fetchAnnulledExamApplicants(term)
+          searchPreRevisionApplicants(term, signal),
+          fetchAnnulledExamApplicants(term, signal)
       ]);
 
-      if (partRes.error) {
-          console.warn('Advertencia en consulta participantes:', partRes.error);
+      if (signal.aborted) return;
+
+      let partData = partRes.data || [];
+
+      // Reintento ante código 57014 en participantes ante frío
+      if (partRes.error && (partRes.error as any).code === '57014') {
+          console.warn('Timeout 57014 en participantes ante caché fría. Ejecutando reintento inmediato...');
+          const fallbackWord = partPrioritizedWords[0] || (isNumeric ? term : '');
+          if (fallbackWord) {
+              let retryQ = supabase
+                  .from('participantes')
+                  .select(PARTICIPANTES_LIGHT_COLS)
+                  .abortSignal(signal);
+              if (isNumeric) {
+                  retryQ = retryQ.eq('CODPOSTULANTE', fallbackWord).limit(30);
+              } else {
+                  retryQ = retryQ.like('NOMBRE', `%${fallbackWord}%`).limit(40);
+              }
+              const retryRes = await retryQ;
+              if (!retryRes.error && retryRes.data) {
+                  partData = retryRes.data;
+              }
+          }
+      } else if (partRes.error) {
+          if (!signal.aborted && !(partRes.error as any).message?.includes('AbortError')) {
+              console.warn('Advertencia en consulta participantes:', partRes.error);
+          }
       }
-      const partData = partRes.data || [];
+
+      // Filtrar participantes en memoria con todos los términos si la búsqueda fue por nombres
+      if (!isNumeric && partData.length > 0 && partAllWords.length > 0) {
+          partData = partData.filter((p: any) => matchesAllTermsInMemory(p.NOMBRE, partAllWords));
+      }
 
       // Combinar resultados de pre_revision_archivos con evidencia histórica de postulantes_examenes_anulados sin duplicar
       const preMatches: any[] = [...preData];
@@ -1172,6 +1405,9 @@ export const StudentLookup: React.FC<{ user: User; notify?: (message: string, ty
           setSelectedProfile(null);
       }
     } catch (err: any) {
+      if (err?.name === 'AbortError' || err?.message?.includes('AbortError')) {
+        return;
+      }
       console.error(err);
       setError('Error al consultar las bases de datos de postulantes e ingresantes.');
     } finally { 
