@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
@@ -223,7 +226,7 @@ async function startServer() {
 
       // Initialize Supabase fallback to real Service Role Key directly
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; // Defaulting to the project inferred from JWT
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       
       if (!supabaseUrl || !supabaseKey) {
         throw new Error("Credenciales de Supabase faltantes en el servidor.");
@@ -311,7 +314,7 @@ async function startServer() {
 
       // Initialize Database Connection
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // Search database for student
@@ -638,7 +641,7 @@ async function startServer() {
 
       // We should ideally verify the requester is an admin, but for this internal preview app we'll handle the creation.
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // 1. Check if user already exists in public DB
@@ -706,7 +709,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // 1. Update in auth system
@@ -737,7 +740,7 @@ async function startServer() {
   app.get("/api/users", async (req, res) => {
     try {
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -762,7 +765,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { error: dbError } = await supabase
@@ -795,7 +798,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // 1. Delete from public.usuarios
@@ -970,7 +973,7 @@ async function startServer() {
     try {
       const modId = req.params.modId;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1001,7 +1004,7 @@ async function startServer() {
   app.get("/api/get-pre-revisions-status", async (req, res) => {
     try {
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1025,7 +1028,7 @@ async function startServer() {
         return res.status(400).json({ error: "Falta la lista de actualizaciones ('updates')." });
       }
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co"; 
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
       let successCount = 0;
       for (const item of updates) {
@@ -1061,7 +1064,7 @@ async function startServer() {
         return res.status(400).json({ error: "Arreglo de slots requerido" });
       }
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase.from('charlas_disponibilidad').insert(slots).select();
@@ -1077,7 +1080,7 @@ async function startServer() {
     try {
       const slot = req.body;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase.from('charlas_disponibilidad').insert([slot]).select().single();
@@ -1094,7 +1097,7 @@ async function startServer() {
       const { id } = req.params;
       const updates = req.body;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase.from('charlas_disponibilidad').update(updates).eq('id', id).select().single();
@@ -1110,7 +1113,7 @@ async function startServer() {
     try {
       const { id } = req.params;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { error } = await supabase.from('charlas_disponibilidad').delete().eq('id', id);
@@ -1127,7 +1130,7 @@ async function startServer() {
       const { id } = req.params;
       const updates = req.body;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       if (updates.reviewed_by && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updates.reviewed_by)) {
@@ -1147,7 +1150,7 @@ async function startServer() {
   app.get("/api/simulacros", async (req, res) => {
     try {
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data: simulacros, error } = await supabase
@@ -1171,22 +1174,32 @@ async function startServer() {
             .eq('simulacro_id', sim.id)
             .eq('ingreso_registrado', true);
 
-          // Obtener desglose por sede
-          const { data: sedeRows } = await supabase
-            .from('simulacro_postulantes')
-            .select('sede, ingreso_registrado')
-            .eq('simulacro_id', sim.id);
-
+          // Obtener desglose por sede en paralelo respetando límite de 1000 de PostgREST
+          const batchSize = 1000;
+          const pages = Math.ceil((totalPostulantes || 0) / batchSize);
+          const sedePromises = [];
+          for (let i = 0; i < pages; i++) {
+            sedePromises.push(
+              supabase
+                .from('simulacro_postulantes')
+                .select('sede, ingreso_registrado')
+                .eq('simulacro_id', sim.id)
+                .range(i * batchSize, (i + 1) * batchSize - 1)
+            );
+          }
+          const sedeResults = await Promise.all(sedePromises);
           const sedesStats: Record<string, { total: number; ingresados: number }> = {};
-          (sedeRows || []).forEach(p => {
-            const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
-            if (!sedesStats[sName]) {
-              sedesStats[sName] = { total: 0, ingresados: 0 };
-            }
-            sedesStats[sName].total++;
-            if (p.ingreso_registrado) {
-              sedesStats[sName].ingresados++;
-            }
+          sedeResults.forEach(res => {
+            (res.data || []).forEach(p => {
+              const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
+              if (!sedesStats[sName]) {
+                sedesStats[sName] = { total: 0, ingresados: 0 };
+              }
+              sedesStats[sName].total++;
+              if (p.ingreso_registrado) {
+                sedesStats[sName].ingresados++;
+              }
+            });
           });
 
           return {
@@ -1211,7 +1224,7 @@ async function startServer() {
       if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1233,7 +1246,7 @@ async function startServer() {
       const { id } = req.params;
       const updates = req.body;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1254,7 +1267,7 @@ async function startServer() {
     try {
       const { id } = req.params;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // Eliminar postulantes y simulacro
@@ -1272,7 +1285,7 @@ async function startServer() {
     try {
       const { id } = req.params;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1304,7 +1317,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // Inserción en bloques de 500 registros para alta velocidad sin saturar conexión
@@ -1367,7 +1380,7 @@ async function startServer() {
       const horaIngresoFinal = hora_ingreso || new Date().toISOString();
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { data, error } = await supabase
@@ -1394,7 +1407,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       let updatedCount = 0;
@@ -1422,7 +1435,7 @@ async function startServer() {
     try {
       const { id } = req.params;
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const { error } = await supabase
@@ -1447,7 +1460,7 @@ async function startServer() {
       }
 
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       const destinationMeta = {
@@ -1524,7 +1537,7 @@ async function startServer() {
     try {
       const code = decodeURIComponent(req.params.code).trim();
       const supabaseUrl = process.env.VITE_SUPABASE_URL || "https://skspesnjdpypjyjuskht.supabase.co";
-      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+      const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // 1. Buscar en Supabase

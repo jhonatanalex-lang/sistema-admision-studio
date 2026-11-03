@@ -196,26 +196,42 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
         const enriched = await Promise.all(
           dbSims.map(async (s: any) => {
             try {
-              const { data: postulantes } = await supabase
+              const { count: exactTotal } = await supabase
                 .from('simulacro_postulantes')
-                .select('sede, ingreso_registrado')
+                .select('*', { count: 'exact', head: true })
                 .eq('simulacro_id', s.id);
+
+              const batchSize = 1000;
+              const pages = Math.ceil((exactTotal || 0) / batchSize);
+              const sedePromises = [];
+              for (let i = 0; i < pages; i++) {
+                sedePromises.push(
+                  supabase
+                    .from('simulacro_postulantes')
+                    .select('sede, ingreso_registrado')
+                    .eq('simulacro_id', s.id)
+                    .range(i * batchSize, (i + 1) * batchSize - 1)
+                );
+              }
+              const sedeResults = await Promise.all(sedePromises);
 
               const sedesStats: Record<string, { total: number; ingresados: number }> = {};
               let tot = 0;
               let ing = 0;
 
-              (postulantes || []).forEach((p: any) => {
-                tot++;
-                const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
-                if (!sedesStats[sName]) {
-                  sedesStats[sName] = { total: 0, ingresados: 0 };
-                }
-                sedesStats[sName].total++;
-                if (p.ingreso_registrado) {
-                  ing++;
-                  sedesStats[sName].ingresados++;
-                }
+              sedeResults.forEach(res => {
+                (res.data || []).forEach((p: any) => {
+                  tot++;
+                  const sName = String(p.sede || 'SEDE CENTRAL').trim().toUpperCase() || 'SEDE CENTRAL';
+                  if (!sedesStats[sName]) {
+                    sedesStats[sName] = { total: 0, ingresados: 0 };
+                  }
+                  sedesStats[sName].total++;
+                  if (p.ingreso_registrado) {
+                    ing++;
+                    sedesStats[sName].ingresados++;
+                  }
+                });
               });
 
               const { data: calif } = await supabase
