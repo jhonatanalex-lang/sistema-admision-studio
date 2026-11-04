@@ -106,6 +106,43 @@ function App() {
                 parsed.role = 'Administrador';
               }
               setUser(parsed);
+
+              // Sincronizar automáticamente en tiempo real el perfil y permisos más recientes desde la BD
+              if (parsed?.id || parsed?.dni) {
+                const query = parsed.id
+                  ? supabase.from('usuarios').select('*').eq('id', parsed.id).maybeSingle()
+                  : supabase.from('usuarios').select('*').eq('dni', parsed.dni).maybeSingle();
+
+                query.then(({ data: dbProfile, error: profileErr }) => {
+                  if (!profileErr && dbProfile && isMounted) {
+                    const isSuperAdmin =
+                      dbProfile.dni === '47773611' ||
+                      dbProfile.name?.toUpperCase().includes('JHONATAN') ||
+                      dbProfile.name?.toUpperCase().includes('CHOQUE-CARITAS') ||
+                      dbProfile.id === '2cddaa12-25a3-4806-8eec-148298c28c43';
+
+                    const freshPermissions = isSuperAdmin ? null : (Array.isArray(dbProfile.permissions) ? dbProfile.permissions : []);
+                    const freshRole = isSuperAdmin ? 'Administrador' : dbProfile.role;
+
+                    const currentPermsStr = JSON.stringify(parsed.permissions || []);
+                    const freshPermsStr = JSON.stringify(freshPermissions || []);
+
+                    if (parsed.role !== freshRole || currentPermsStr !== freshPermsStr || parsed.name !== dbProfile.name) {
+                      const updatedUser: User = {
+                        ...parsed,
+                        ...dbProfile,
+                        role: freshRole,
+                        permissions: freshPermissions,
+                      };
+                      try {
+                        localStorage.setItem('unsaac_auth_user', JSON.stringify(updatedUser));
+                      } catch (e) {}
+                      setUser(updatedUser);
+                    }
+                  }
+                }).catch(() => {});
+              }
+
               // Registrar ingreso a la web app si no se ha registrado aún en la sesión actual
               try {
                 if (typeof sessionStorage !== 'undefined') {
@@ -128,10 +165,56 @@ function App() {
 
     initAuth();
 
+    // Revalidar permisos automáticamente en segundo plano cuando el usuario regresa a la pestaña
+    const handleFocusSync = () => {
+      try {
+        const savedUserStr = localStorage.getItem('unsaac_auth_user');
+        if (!savedUserStr) return;
+        const parsed = JSON.parse(savedUserStr);
+        if (parsed?.id || parsed?.dni) {
+          const query = parsed.id
+            ? supabase.from('usuarios').select('*').eq('id', parsed.id).maybeSingle()
+            : supabase.from('usuarios').select('*').eq('dni', parsed.dni).maybeSingle();
+
+          query.then(({ data: dbProfile, error: profileErr }) => {
+            if (!profileErr && dbProfile && isMounted) {
+              const isSuperAdmin =
+                dbProfile.dni === '47773611' ||
+                dbProfile.name?.toUpperCase().includes('JHONATAN') ||
+                dbProfile.name?.toUpperCase().includes('CHOQUE-CARITAS') ||
+                dbProfile.id === '2cddaa12-25a3-4806-8eec-148298c28c43';
+
+              const freshPermissions = isSuperAdmin ? null : (Array.isArray(dbProfile.permissions) ? dbProfile.permissions : []);
+              const freshRole = isSuperAdmin ? 'Administrador' : dbProfile.role;
+
+              const currentPermsStr = JSON.stringify(parsed.permissions || []);
+              const freshPermsStr = JSON.stringify(freshPermissions || []);
+
+              if (parsed.role !== freshRole || currentPermsStr !== freshPermsStr || parsed.name !== dbProfile.name) {
+                const updatedUser: User = {
+                  ...parsed,
+                  ...dbProfile,
+                  role: freshRole,
+                  permissions: freshPermissions,
+                };
+                try {
+                  localStorage.setItem('unsaac_auth_user', JSON.stringify(updatedUser));
+                } catch (e) {}
+                setUser(updatedUser);
+              }
+            }
+          }).catch(() => {});
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+
     return () => {
       isMounted = false;
       clearTimeout(safetyTimeout);
       cleanupKeepAlive();
+      window.removeEventListener('focus', handleFocusSync);
     };
   }, []);
 
