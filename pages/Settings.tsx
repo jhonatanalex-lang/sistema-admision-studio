@@ -48,6 +48,7 @@ export const Settings: React.FC<{ user: User, notify?: (msg: string, type?: 'suc
     { id: 'view_control_ingreso', label: 'Control de Ingreso (Simulacro / Kiosko)' },
     { id: 'view_prestamos', label: 'Préstamo de Bienes' },
     { id: 'view_agenda', label: 'Agenda de Eventos' },
+    { id: 'view_charlas_colegios', label: 'Charlas y Citas de Colegios' },
     { id: 'view_auditoria', label: 'Auditoría y Logs' },
     { id: 'view_adjudicaciones', label: 'Adjudicaciones' },
     { id: 'view_vacancy_evolution', label: 'Evolución de Vacantes' },
