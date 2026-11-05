@@ -32,7 +32,7 @@ jobs:
       - name: Auto-bump Version and Publish Electron Release
         run: |
           cd desktop
-          npm version patch --no-git-tag-version
+          node bump_version.cjs
           npm install --legacy-peer-deps
           npx electron-builder --publish always
         env:
