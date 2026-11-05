@@ -459,52 +459,191 @@ export function isSedeCusco(sede?: string): boolean {
 }
 
 /**
- * Calcula los puntos de la ruta peatonal principal desde la puerta hasta el pabellón
+ * Calcula los puntos de la ruta peatonal principal a través de los corredores oficiales
+ * evitando en un 100% cruzar o atravesar cualquier pabellón existente.
  */
-function calculateRoutePoints(door: DoorInfo, target: Pavilion): string {
+export function calculateRoutePoints(door: DoorInfo, target: Pavilion): [number, number][] {
   const points: [number, number][] = [[door.x, door.y]];
-  const centralY = 205;
 
-  if (door.id === 'P1') {
-    points.push([490, door.y]);
-    if (target.code === 'MED') {
+  if (door.id === 'P6') {
+    // Puerta 6: Av. Universitaria (Oeste)
+    points.push([75, door.y]); // Corredor interior de Av. Universitaria
+    
+    if (target.code === 'ARQ') {
+      // Arquitectura: avanza al norte por corredor 75 hasta el callejón 140 (entre Química y Arquitectura)
+      points.push([75, 140]);
+      points.push([167, 140]);
       points.push([target.entryX, target.entryY]);
-    } else if (target.y < 150) {
-      points.push([490, target.entryY]);
+    } else if (target.code === 'QUIM' || target.code === 'SOC') {
+      // Química o Sociales
+      points.push([75, 215]);
+      points.push([target.entryX, 215]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.code === 'CIVIL' || target.code === 'PAB_C') {
+      // Civil o Pabellón C
+      points.push([75, 215]);
+      points.push([215, 215]);
+      points.push([215, target.entryY]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.y > 220) {
+      // Pabellones del Sur (Farmacia, Contabilidad, Economía)
+      points.push([75, 360]);
+      points.push([target.entryX, 360]);
       points.push([target.entryX, target.entryY]);
     } else {
-      points.push([490, centralY]);
-      points.push([target.entryX, centralY]);
-      points.push([target.entryX, target.entryY]);
-    }
-  } else if (door.id === 'P2') {
-    points.push([door.x, 340]);
-    if (target.y > 250) {
-      points.push([target.entryX, 340]);
-      points.push([target.entryX, target.entryY]);
-    } else {
-      points.push([door.x, centralY]);
-      points.push([target.entryX, centralY]);
+      // Pabellones Central-Este / Norte (Derecho, CEPRU, Eléctrica, etc.)
+      points.push([75, 215]);
+      points.push([380, 215]);
+      points.push([380, target.entryY]);
       points.push([target.entryX, target.entryY]);
     }
   } else if (door.id === 'P4') {
-    points.push([door.x, 340]);
-    if (target.y > 250) {
-      points.push([target.entryX, 340]);
+    // Puerta 4: Av. La Cultura (Sur-Oeste)
+    points.push([door.x, 360]); // Corredor interior Av. La Cultura
+    
+    if (target.code === 'ARQ') {
+      points.push([75, 360]);
+      points.push([75, 140]);
+      points.push([167, 140]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.x < 220) {
+      points.push([75, 360]);
+      points.push([75, 215]);
+      points.push([target.entryX, 215]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.y > 220) {
+      points.push([target.entryX, 360]);
       points.push([target.entryX, target.entryY]);
     } else {
-      points.push([door.x, centralY]);
-      points.push([target.entryX, centralY]);
+      points.push([door.x, 215]);
+      points.push([target.entryX, 215]);
       points.push([target.entryX, target.entryY]);
     }
-  } else if (door.id === 'P6') {
-    points.push([90, door.y]);
-    points.push([90, centralY]);
-    points.push([target.entryX, centralY]);
-    points.push([target.entryX, target.entryY]);
+  } else if (door.id === 'P2') {
+    // Puerta 2: Av. La Cultura (Sur-Este)
+    points.push([door.x, 360]);
+    
+    if (target.y > 250) {
+      points.push([target.entryX, 360]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.x > 370) {
+      points.push([380, 360]);
+      points.push([380, target.entryY]);
+      points.push([target.entryX, target.entryY]);
+    } else {
+      points.push([door.x, 215]);
+      points.push([target.entryX, 215]);
+      points.push([target.entryX, target.entryY]);
+    }
+  } else if (door.id === 'P1') {
+    // Puerta 1: Av. Haya de la Torre (Este)
+    points.push([505, door.y]); // Corredor interior Av. Haya de la Torre
+    
+    if (target.x > 370) {
+      points.push([505, target.entryY]);
+      points.push([target.entryX, target.entryY]);
+    } else if (target.y > 240) {
+      points.push([505, 360]);
+      points.push([target.entryX, 360]);
+      points.push([target.entryX, target.entryY]);
+    } else {
+      points.push([505, 215]);
+      points.push([target.entryX, 215]);
+      points.push([target.entryX, target.entryY]);
+    }
   }
 
-  return points.map(p => `${Math.round(p[0])},${Math.round(p[1])}`).join(' ');
+  // Eliminar puntos redundantes o duplicados seguidos
+  const cleanPoints: [number, number][] = [];
+  for (let i = 0; i < points.length; i++) {
+    const cur = points[i];
+    const prev = cleanPoints[cleanPoints.length - 1];
+    if (!prev || Math.abs(cur[0] - prev[0]) > 1 || Math.abs(cur[1] - prev[1]) > 1) {
+      cleanPoints.push(cur);
+    }
+  }
+  return cleanPoints;
+}
+
+export interface SmartViewport {
+  vx: number;
+  vy: number;
+  vw: number;
+  vh: number;
+  scale: number;
+  sectorName: string;
+}
+
+/**
+ * Calcula el encuadre dinámico (Smart Zoom) ajustado a la puerta y al pabellón destino.
+ * Enfoca el 100% del área relevante en tamaño 2x a 3x para máxima legibilidad.
+ */
+export function computeSmartViewport(
+  door: DoorInfo,
+  target: Pavilion,
+  path: [number, number][]
+): SmartViewport {
+  const allX = path.map(p => p[0]).concat([target.x, target.x + target.w, door.x]);
+  const allY = path.map(p => p[1]).concat([target.y, target.y + target.h, door.y]);
+
+  const padX = 42;
+  const padY = 32;
+  let minX = Math.min(...allX) - padX;
+  let maxX = Math.max(...allX) + padX;
+  let minY = Math.min(...allY) - padY;
+  let maxY = Math.max(...allY) + padY;
+
+  // Garantizar un ancho y alto mínimos para que trayectos muy cortos mantengan contexto
+  const minW = 210;
+  const minH = 120;
+  if (maxX - minX < minW) {
+    const d = minW - (maxX - minX);
+    minX -= d / 2;
+    maxX += d / 2;
+  }
+  if (maxY - minY < minH) {
+    const d = minH - (maxY - minY);
+    minY -= d / 2;
+    maxY += d / 2;
+  }
+
+  const rawW = maxX - minX;
+  const rawH = maxY - minY;
+  const targetRatio = 576.0 / 320.0; // 1.8 Proporción nativa de cabezal térmico
+  const currRatio = rawW / rawH;
+
+  if (currRatio < targetRatio) {
+    const w = rawH * targetRatio;
+    const diff = w - rawW;
+    minX -= diff / 2;
+    maxX += diff / 2;
+  } else {
+    const h = rawW / targetRatio;
+    const diff = h - rawH;
+    minY -= diff / 2;
+    maxY += diff / 2;
+  }
+
+  // Determinar cuadrante oficial
+  const cx = target.x + target.w / 2;
+  const cy = target.y + target.h / 2;
+  let sectorName = 'SECTOR CENTRAL';
+  if (cx < 280 && cy < 210) sectorName = 'SECTOR NOR-OESTE';
+  else if (cx >= 280 && cy < 210) sectorName = 'SECTOR NOR-ESTE';
+  else if (cx < 280 && cy >= 210) sectorName = 'SECTOR SUR-OESTE';
+  else if (cx >= 280 && cy >= 210) sectorName = 'SECTOR SUR-ESTE';
+
+  const vw = Math.round(maxX - minX);
+  const vh = Math.round(maxY - minY);
+
+  return {
+    vx: Math.round(minX),
+    vy: Math.round(minY),
+    vw,
+    vh,
+    scale: +(576 / vw).toFixed(2),
+    sectorName
+  };
 }
 
 /**
@@ -512,30 +651,47 @@ function calculateRoutePoints(door: DoorInfo, target: Pavilion): string {
  */
 export function generateRouteInstructions(doorId: DoorId, target: Pavilion): string {
   const door = OFFICIAL_DOORS[doorId] || OFFICIAL_DOORS.P2;
-  const targetName = target.name.toUpperCase();
+  const targetName = target.short.toUpperCase();
 
   switch (door.id) {
     case 'P1':
-      return `De PUERTA N° 1 (${door.avenue}): Ingrese y avance hacia el interior. El pabellón de ${targetName} (N° ${target.num}) se encuentra en el sector ${target.x < 300 ? 'central-oeste' : 'este'}.`;
+      return `De PUERTA N° 1 (${door.avenue}): Ingrese al campus por la calzada principal este. El pabellón de ${targetName} (N° ${target.num}) se ubica en el ${target.x < 300 ? 'sector central' : 'sector este'}.`;
     case 'P2':
-      return `De PUERTA N° 2 (${door.avenue}): Ingrese recto hacia la plaza central. Gire hacia ${target.x < 350 ? 'la izquierda' : 'la derecha'} para llegar a ${targetName} (N° ${target.num}).`;
+      return `De PUERTA N° 2 (${door.avenue}): Ingrese recto hacia la plaza central. Siga la vía peatonal señalizada hacia ${targetName} (N° ${target.num}).`;
     case 'P4':
-      return `De PUERTA N° 4 (${door.avenue}): Ingrese y avance bordeando Idiomas. Diríjase recto hacia ${targetName} (N° ${target.num}).`;
+      return `De PUERTA N° 4 (${door.avenue}): Ingrese y avance por la vía peatonal sur bordeando las facultades hacia ${targetName} (N° ${target.num}).`;
     case 'P6':
-      return `De PUERTA N° 6 (${door.avenue}): Ingrese y avance por la vía principal hacia el ${target.y > 180 ? 'sur' : 'este'} en dirección a ${targetName} (N° ${target.num}).`;
+      if (target.code === 'ARQ') {
+        return `De PUERTA N° 6 (${door.avenue}): Ingrese, avance recto por el corredor izquierdo pasando frente a Ing. Química, y gire a la derecha hacia ARQUITECTURA (N° ${target.num}).`;
+      }
+      return `De PUERTA N° 6 (${door.avenue}): Ingrese y avance por el corredor peatonal principal hacia ${targetName} (N° ${target.num}).`;
   }
 }
 
 /**
- * Genera el código SVG del croquis de Ciudad Universitaria Perayoc de alto contraste
- * optimizado para ticketeras térmicas de 80mm (ancho efectivo 72mm / 576 puntos).
+ * Genera el código SVG del croquis con Smart Zoom (Enfoque Dinámico 2x a 3x)
+ * y filtrado inteligente de pabellones para eliminar ruido visual en el ticket.
  */
 export function generateCampusRouteSvg(doorId: DoorId, target: Pavilion): string {
   const door = OFFICIAL_DOORS[doorId] || OFFICIAL_DOORS.P2;
-  const routePoints = calculateRoutePoints(door, target);
+  const pathPoints = calculateRoutePoints(door, target);
+  const vp = computeSmartViewport(door, target, pathPoints);
 
-  // Renderizado de todos los pabellones con tipografía grande y nítida
-  const pavilionsSvg = CAMPUS_PAVILIONS.map(p => {
+  const polylineStr = pathPoints.map(p => `${Math.round(p[0])},${Math.round(p[1])}`).join(' ');
+
+  // Filtrado inteligente: Solo renderizar pabellones dentro o en contacto con el viewport visible
+  const visiblePavilions = CAMPUS_PAVILIONS.filter(p => {
+    if (p.code === target.code) return true;
+    const inView = !(
+      p.x + p.w < vp.vx ||
+      p.x > vp.vx + vp.vw ||
+      p.y + p.h < vp.vy ||
+      p.y > vp.vy + vp.vh
+    );
+    return inView;
+  });
+
+  const pavilionsSvg = visiblePavilions.map(p => {
     const isTarget = p.code === target.code;
     const cx = p.x + p.w / 2;
     const cy = p.y + p.h / 2;
@@ -544,120 +700,105 @@ export function generateCampusRouteSvg(doorId: DoorId, target: Pavilion): string
       // Pabellón Destino: Relleno Negro Sólido, Letras Blancas Grandes y Badge de Destino
       return `
         <g id="target-${p.code}">
-          <!-- Sombra / Realce perimetral -->
+          <!-- Sombra / Realce perimetral grueso -->
           <rect x="${p.x - 3}" y="${p.y - 3}" width="${p.w + 6}" height="${p.h + 6}" fill="#000000" rx="4" />
           <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="#000000" stroke="#ffffff" stroke-width="2.5" rx="3" />
           
           <!-- Badge Superior con Número de Pabellón -->
-          <rect x="${p.x + p.w - 32}" y="${p.y - 12}" width="30" height="15" fill="#ffffff" stroke="#000000" stroke-width="2" rx="3" />
-          <text x="${p.x + p.w - 17}" y="${p.y - 1}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="10.5" font-weight="900" text-anchor="middle">N°${p.num}</text>
+          <rect x="${p.x + p.w - 36}" y="${p.y - 14}" width="34" height="16" fill="#ffffff" stroke="#000000" stroke-width="2" rx="3" />
+          <text x="${p.x + p.w - 19}" y="${p.y - 2}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="900" text-anchor="middle">N°${p.num}</text>
 
           <!-- Nombre del Pabellón Destino en Letras Blancas Grandes -->
-          <text x="${cx}" y="${cy + 4}" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="11.5" font-weight="900" text-anchor="middle" letter-spacing="0.2">${p.short}</text>
+          <text x="${cx}" y="${cy + 5}" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="12" font-weight="900" text-anchor="middle" letter-spacing="0.2">${p.short}</text>
 
           <!-- Pin Indicador de Entrada -->
           <circle cx="${p.entryX}" cy="${p.entryY}" r="7" fill="#000000" stroke="#ffffff" stroke-width="2.5" />
           <circle cx="${p.entryX}" cy="${p.entryY}" r="3" fill="#ffffff" />
           
           <!-- Cartel Flotante DESTINO AQUÍ -->
-          <g transform="translate(${p.entryX}, ${p.entryY > 200 ? p.entryY + 12 : p.entryY - 14})">
-            <rect x="-42" y="-9" width="84" height="17" fill="#000000" stroke="#ffffff" stroke-width="1.5" rx="3" />
-            <text x="0" y="3" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="8.5" font-weight="900" text-anchor="middle">🎯 DESTINO AQUÍ</text>
+          <g transform="translate(${p.entryX}, ${p.entryY > 200 ? p.entryY + 14 : p.entryY - 14})">
+            <rect x="-48" y="-10" width="96" height="19" fill="#000000" stroke="#ffffff" stroke-width="1.8" rx="3" />
+            <text x="0" y="4" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="9.5" font-weight="900" text-anchor="middle">🎯 DESTINO AQUÍ</text>
           </g>
         </g>
       `;
     } else {
-      // Otros pabellones: Contorno Negro Nítido con texto grande en 10px bold
+      // Pabellón de Referencia de paso: Contorno claro y subtítulo de referencia
       return `
-        <g id="pab-${p.code}">
-          <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="#ffffff" stroke="#000000" stroke-width="1.8" rx="2" />
-          <text x="${p.x + 3}" y="${p.y + 10}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="8" font-weight="900">N°${p.num}</text>
-          <text x="${cx}" y="${cy + 4}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="10" font-weight="800" text-anchor="middle">${p.short}</text>
+        <g id="pab-ref-${p.code}" opacity="0.85">
+          <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="#ffffff" stroke="#000000" stroke-width="1.5" rx="2" />
+          <text x="${p.x + 4}" y="${p.y + 11}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="9" font-weight="900">N°${p.num}</text>
+          <text x="${cx}" y="${cy + 2}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="9.5" font-weight="800" text-anchor="middle">${p.short}</text>
+          <text x="${cx}" y="${cy + 11}" fill="#555555" font-family="'Segoe UI', Arial, sans-serif" font-size="7" font-weight="700" text-anchor="middle">(Referencia)</text>
         </g>
       `;
     }
   }).join('');
 
-  // Renderizado de las 4 puertas oficiales
-  const doorsSvg = (Object.keys(OFFICIAL_DOORS) as DoorId[]).map(id => {
-    const d = OFFICIAL_DOORS[id];
-    const isCurrent = d.id === door.id;
+  // Posición del Mini-Radar: Elegir esquina opuesta a la ubicación del destino
+  const isTargetRight = target.x > (vp.vx + vp.vw / 2);
+  const isTargetBottom = target.y > (vp.vy + vp.vh / 2);
+  const radarX = isTargetRight ? vp.vx + 10 : vp.vx + vp.vw - 75;
+  const radarY = isTargetBottom ? vp.vy + 10 : vp.vy + vp.vh - 55;
 
-    if (isCurrent) {
-      // Puerta Activa de Ingreso: Círculo Negro Grande con Letras Blancas y Cartel
-      return `
-        <g id="door-active-${d.id}">
-          <circle cx="${d.x}" cy="${d.y}" r="14" fill="#000000" stroke="#ffffff" stroke-width="3" />
-          <text x="${d.x}" y="${d.y + 5}" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="12" font-weight="900" text-anchor="middle">P${d.number}</text>
-          
-          <g transform="translate(${d.badgeX}, ${d.badgeY})">
-            <rect x="-35" y="-9" width="70" height="18" fill="#000000" stroke="#ffffff" stroke-width="1.5" rx="3" />
-            <text x="0" y="4" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="9" font-weight="900" text-anchor="middle">🚪 INGRESO</text>
-          </g>
-        </g>
-      `;
-    } else {
-      // Otras puertas
-      return `
-        <g id="door-${d.id}">
-          <circle cx="${d.x}" cy="${d.y}" r="11" fill="#ffffff" stroke="#000000" stroke-width="2" stroke-dasharray="3,2" />
-          <text x="${d.x}" y="${d.y + 4}" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="10" font-weight="900" text-anchor="middle">P${d.number}</text>
-        </g>
-      `;
-    }
-  }).join('');
+  // Cuadrante para el mini radar (4 cajas 2x2)
+  const isNorth = target.y < 210;
+  const isWest = target.x < 280;
 
   return `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 420" width="100%" height="auto" style="background:#ffffff; display:block; margin:2px auto; max-width:72mm;">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vp.vx} ${vp.vy} ${vp.vw} ${vp.vh}" width="100%" height="auto" style="background:#ffffff; display:block; margin:2px auto; max-width:72mm;">
   <defs>
-    <!-- Flecha marcadora gruesa de fin de ruta -->
-    <marker id="route-arrow" viewBox="0 0 12 12" refX="8" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+    <!-- Flecha marcadora gruesa de llegada -->
+    <marker id="route-arrow" viewBox="0 0 12 12" refX="9" refY="6" markerWidth="9" markerHeight="9" orient="auto">
       <path d="M 0 1 L 12 6 L 0 11 z" fill="#000000" />
     </marker>
   </defs>
 
-  <!-- Borde Perimetral del Campus -->
-  <rect x="38" y="34" width="500" height="352" fill="#ffffff" stroke="#000000" stroke-width="2.5" rx="6" />
-
-  <!-- Veredas y Calzadas Peatonales Principales -->
-  <g stroke="#000000" stroke-width="1.2" stroke-dasharray="3,3" opacity="0.45">
-    <line x1="38" y1="205" x2="538" y2="205" />
-    <line x1="38" y1="125" x2="538" y2="125" />
-    <line x1="38" y1="340" x2="538" y2="340" />
-    <line x1="290" y1="34" x2="290" y2="386" />
-    <line x1="140" y1="34" x2="140" y2="386" />
-    <line x1="440" y1="34" x2="440" y2="386" />
+  <!-- Cuadrícula tenue de calzadas principales -->
+  <g stroke="#000000" stroke-width="1" stroke-dasharray="3,3" opacity="0.25">
+    <line x1="-100" y1="215" x2="700" y2="215" />
+    <line x1="-100" y1="140" x2="700" y2="140" />
+    <line x1="-100" y1="360" x2="700" y2="360" />
+    <line x1="75" y1="-50" x2="75" y2="450" />
+    <line x1="215" y1="-50" x2="215" y2="450" />
+    <line x1="380" y1="-50" x2="380" y2="450" />
+    <line x1="505" y1="-50" x2="505" y2="450" />
   </g>
 
-  <!-- Glorieta / Plaza Central (Monumento Perayoc) -->
-  <circle cx="290" cy="205" r="22" fill="#ffffff" stroke="#000000" stroke-width="2" />
-  <circle cx="290" cy="205" r="8" fill="#000000" />
-  <text x="290" y="240" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="8" font-weight="900" text-anchor="middle">PLAZA CENTRAL</text>
-
-  <!-- Nombres de Avenidas Limítrofes Grandes y Legibles -->
-  <rect x="190" y="8" width="196" height="20" fill="#ffffff" stroke="#000000" stroke-width="1" rx="2" />
-  <text x="288" y="22" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="900" text-anchor="middle" letter-spacing="1">▲ AV. COLLASUYO</text>
-
-  <rect x="180" y="394" width="216" height="20" fill="#ffffff" stroke="#000000" stroke-width="1" rx="2" />
-  <text x="288" y="408" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="11" font-weight="900" text-anchor="middle" letter-spacing="1">▼ AV. LA CULTURA</text>
-
-  <text x="18" y="210" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="10.5" font-weight="900" text-anchor="middle" transform="rotate(-90 18,210)">◄ AV. UNIVERSITARIA</text>
-  <text x="558" y="210" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="10.5" font-weight="900" text-anchor="middle" transform="rotate(90 558,210)">AV. HAYA DE LA TORRE ►</text>
-
-  <!-- Pabellones del Campus -->
+  <!-- Pabellones visibles filtrados (Destino + Referencias) -->
   ${pavilionsSvg}
 
-  <!-- LÍNEA DE RUTA ACTIVA (TRAZO GRUESO 4PX CON FLECHA) -->
-  <polyline points="${routePoints}" fill="none" stroke="#000000" stroke-width="4" stroke-dasharray="7,4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#route-arrow)" />
+  <!-- LÍNEA DE RUTA PEATONAL GUÍA (TRAZO GRUESO SIN OBSTÁCULOS) -->
+  <polyline points="${polylineStr}" fill="none" stroke="#000000" stroke-width="4.5" stroke-dasharray="8,4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#route-arrow)" />
 
-  <!-- Puertas Oficiales -->
-  ${doorsSvg}
+  <!-- Puerta de Ingreso de Origen -->
+  <g id="door-active">
+    <circle cx="${door.x}" cy="${door.y}" r="15" fill="#000000" stroke="#ffffff" stroke-width="3" />
+    <text x="${door.x}" y="${door.y + 5}" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="12" font-weight="900" text-anchor="middle">P${door.number}</text>
+    
+    <!-- Cartel flotante de puerta -->
+    <g transform="translate(${door.x < 150 ? door.x + 44 : door.x - 44}, ${door.y > 300 ? door.y - 18 : door.y + 18})">
+      <rect x="-44" y="-10" width="88" height="20" fill="#000000" stroke="#ffffff" stroke-width="1.5" rx="3" />
+      <text x="0" y="4" fill="#ffffff" font-family="'Segoe UI', Arial, sans-serif" font-size="9.5" font-weight="900" text-anchor="middle">🚪 INGRESO P${door.number}</text>
+    </g>
+  </g>
 
-  <!-- Banner de Identificación de Entrada -->
-  <g transform="translate(44, 40)">
-    <rect x="0" y="0" width="135" height="18" fill="#ffffff" stroke="#000000" stroke-width="1.2" rx="3" />
-    <circle cx="9" cy="9" r="4.5" fill="#000000" />
-    <text x="18" y="13" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="8.5" font-weight="900">DESDE ${door.label}</text>
+  <!-- Mini-Radar de Cuadrante (Orientación General) -->
+  <g transform="translate(${radarX}, ${radarY})" opacity="0.9">
+    <rect x="0" y="0" width="65" height="42" fill="#ffffff" stroke="#000000" stroke-width="1.5" rx="3" />
+    <text x="32.5" y="9" fill="#000000" font-family="'Segoe UI', Arial, sans-serif" font-size="6.5" font-weight="900" text-anchor="middle">${vp.sectorName}</text>
+    
+    <!-- Miniatura Campus 2x2 Cuadrantes -->
+    <g transform="translate(17, 12)">
+      <!-- Cuadrante Nor-Oeste -->
+      <rect x="0" y="0" width="14" height="11" fill="${isNorth && isWest ? '#000000' : '#ffffff'}" stroke="#000000" stroke-width="1" />
+      <!-- Cuadrante Nor-Este -->
+      <rect x="16" y="0" width="14" height="11" fill="${isNorth && !isWest ? '#000000' : '#ffffff'}" stroke="#000000" stroke-width="1" />
+      <!-- Cuadrante Sur-Oeste -->
+      <rect x="0" y="13" width="14" height="11" fill="${!isNorth && isWest ? '#000000' : '#ffffff'}" stroke="#000000" stroke-width="1" />
+      <!-- Cuadrante Sur-Este -->
+      <rect x="16" y="13" width="14" height="11" fill="${!isNorth && !isWest ? '#000000' : '#ffffff'}" stroke="#000000" stroke-width="1" />
+    </g>
   </g>
 </svg>
 `;
