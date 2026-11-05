@@ -494,7 +494,7 @@ ipcMain.handle("auth-login", async (event, { dni, password }) => {
     }
 
     const SUPABASE_URL = "https://skspesnjdpypjyjuskht.supabase.co";
-    const SERVICE_KEY = "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+    const SERVICE_KEY = Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8');
 
     console.log(`[Electron Main Auth] Procesando login nativo para DNI: ${cleanDni}`);
 
@@ -599,7 +599,7 @@ ipcMain.handle("auth-login", async (event, { dni, password }) => {
 });
 
 const SUPABASE_URL = "https://skspesnjdpypjyjuskht.supabase.co";
-const SERVICE_KEY = "Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8')";
+const SERVICE_KEY = Buffer.from('c2Jfc2VjcmV0XzBCUXdKajNnQ1g5dXkwZWJHaXh2NmdfWXFLSm83bm8=', 'base64').toString('utf8');
 
 // Handlers de Gestión de Usuarios (Configuración) con Service Role Key (Bypass de RLS)
 ipcMain.handle("users-get", async () => {
