@@ -605,6 +605,7 @@ export interface Simulacro {
   nombre: string;
   fecha: string;
   estado: 'Activo' | 'En Curso' | 'Finalizado';
+  sede?: string;
   created_at?: string;
   total_postulantes?: number;
   total_ingresados?: number;
@@ -626,6 +627,9 @@ export interface SimulacroPostulante {
   carpeta?: string;
   carrera?: string;
   grupo?: string;
+  pabellon?: string;
+  nombre_pabellon?: string;
+  puerta_ingreso?: string;
   ingreso_registrado: boolean;
   hora_ingreso?: string | null;
   created_at?: string;

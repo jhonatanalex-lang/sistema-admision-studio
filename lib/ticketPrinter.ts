@@ -3,7 +3,28 @@
  * Soporta doble vía:
  * 1. En App de Escritorio (Electron): Impresión 100% silenciosa directa al hardware sin cuadros de diálogo.
  * 2. En Navegadores Web (Chrome / Edge): Impresión vía iframe fuera de pantalla con compatibilidad Chromium y soporte para flag --kiosk-printing.
+ * Incluye orientación con croquis vectorial monocromático (1-bit) para Ciudad Universitaria UNSAAC (Cusco).
  */
+
+import {
+  DoorId,
+  DoorInfo,
+  OFFICIAL_DOORS,
+  Pavilion,
+  resolvePavilion,
+  isSedeCusco,
+  generateCampusRouteSvg,
+  generateRouteInstructions,
+} from './campusMapSvg';
+
+export type { DoorId, DoorInfo, Pavilion };
+export {
+  OFFICIAL_DOORS,
+  resolvePavilion,
+  isSedeCusco,
+  generateCampusRouteSvg,
+  generateRouteInstructions,
+};
 
 export interface TicketPostulanteData {
   dni: string;
@@ -16,9 +37,46 @@ export interface TicketPostulanteData {
   carrera?: string;
   grupo?: string;
   hora_ingreso?: string | null;
+  pabellon?: string;
+  nombre_pabellon?: string;
+  puerta_ingreso?: DoorId | string;
 }
 
-export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNombre: string): string {
+export function getSavedKioskDoor(): DoorId {
+  if (typeof localStorage === 'undefined') return 'P2';
+  try {
+    const saved = localStorage.getItem('kiosk_current_door');
+    if (saved && (saved === 'P1' || saved === 'P2' || saved === 'P4' || saved === 'P6')) {
+      return saved as DoorId;
+    }
+  } catch (e) {}
+  return 'P2';
+}
+
+export function saveKioskDoor(door: DoorId) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem('kiosk_current_door', door);
+  } catch (e) {}
+}
+
+/**
+ * Normaliza cualquier identificador o texto a un DoorId válido ('P1' | 'P2' | 'P4' | 'P6')
+ */
+export function normalizeDoorId(doorInput?: string | null): DoorId {
+  if (!doorInput) return getSavedKioskDoor();
+  const s = String(doorInput).toUpperCase().trim();
+  if (s.includes('1') || s === 'P1') return 'P1';
+  if (s.includes('4') || s === 'P4') return 'P4';
+  if (s.includes('6') || s === 'P6') return 'P6';
+  return 'P2'; // Predeterminado Puerta 2
+}
+
+export function generateTicketHtml(
+  postulante: TicketPostulanteData,
+  simulacroNombre: string,
+  selectedDoor?: DoorId | string
+): string {
   const horaActual = postulante.hora_ingreso
     ? new Date(postulante.hora_ingreso).toLocaleTimeString('es-PE', { hour12: false })
     : new Date().toLocaleTimeString('es-PE', { hour12: false });
@@ -31,6 +89,24 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
     [postulante.apellidos, postulante.nombres].filter(Boolean).join(', ') ||
     'POSTULANTE';
 
+  // Determinación de Sede Central (Cusco) vs Filiales
+  const isCusco = isSedeCusco(postulante.sede);
+
+  // Normalizar Puerta de Ingreso
+  const doorKey = normalizeDoorId(selectedDoor || postulante.puerta_ingreso);
+  const doorInfo = OFFICIAL_DOORS[doorKey] || OFFICIAL_DOORS.P2;
+
+  // En Cusco calculamos el pabellón de destino y croquis de ruta
+  let targetPavilion: Pavilion | null = null;
+  let croquisSvgHtml = '';
+  let routeInstructions = '';
+
+  if (isCusco) {
+    targetPavilion = resolvePavilion(postulante);
+    croquisSvgHtml = generateCampusRouteSvg(doorKey, targetPavilion);
+    routeInstructions = generateRouteInstructions(doorKey, targetPavilion);
+  }
+
   return `<!DOCTYPE html>
 <html>
   <head>
@@ -38,7 +114,7 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
     <title>Ticket Ingreso - ${postulante.dni}</title>
     <style>
       @page {
-        size: 80mm 220mm;
+        size: 80mm auto;
         margin: 0mm;
       }
       * {
@@ -52,13 +128,13 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
         width: 72mm;
         max-width: 72mm;
         margin: 0;
-        padding: 2mm 2mm 8mm 2mm;
+        padding: 1.5mm 1.5mm 6mm 1.5mm;
         color: #000000 !important;
         background-color: #ffffff !important;
         font-family: 'Courier New', Courier, monospace, 'Segoe UI', Arial, sans-serif;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
-        line-height: 1.25;
+        line-height: 1.2;
         visibility: visible !important;
         opacity: 1 !important;
       }
@@ -67,7 +143,7 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
           width: 72mm !important;
           max-width: 72mm !important;
           margin: 0 !important;
-          padding: 2mm 1mm 6mm 1mm !important;
+          padding: 1.5mm 1mm 6mm 1mm !important;
           color: #000000 !important;
           background: #ffffff !important;
           visibility: visible !important;
@@ -82,12 +158,20 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
       }
       .text-center { text-align: center; }
       .text-right { text-align: right; }
-      .title { font-size: 13px; font-weight: 900; margin: 0; letter-spacing: -0.5px; }
-      .subtitle { font-size: 11px; margin: 2px 0; font-weight: 700; }
-      .divider { border-top: 1px dashed #000000; margin: 6px 0; }
-      .row { display: flex; justify-content: space-between; margin: 3px 0; font-size: 11px; font-weight: 700; }
-      .big-box { border: 2px solid #000000; padding: 6px; margin: 6px 0; text-align: center; }
-      .big-text { font-size: 18px; font-weight: 900; }
+      .title { font-size: 12px; font-weight: 900; margin: 0; letter-spacing: -0.5px; line-height: 1.15; }
+      .subtitle { font-size: 10.5px; margin: 1px 0; font-weight: 700; }
+      .divider { border-top: 1px dashed #000000; margin: 4px 0; }
+      .row { display: flex; justify-content: space-between; margin: 2.5px 0; font-size: 10.5px; font-weight: 700; }
+      .big-box { border: 2px solid #000000; padding: 4px; margin: 5px 0; text-align: center; }
+      .big-text { font-size: 18px; font-weight: 900; letter-spacing: -0.5px; }
+      .route-box {
+        border: 1px solid #000000;
+        padding: 4px;
+        margin: 4px 0;
+        font-size: 9px;
+        line-height: 1.25;
+        background-color: #ffffff;
+      }
     </style>
   </head>
   <body>
@@ -98,39 +182,72 @@ export function generateTicketHtml(postulante: TicketPostulanteData, simulacroNo
       <p class="subtitle" style="text-transform: uppercase;">${simulacroNombre}</p>
       <div class="divider"></div>
     </div>
+
     <div class="row">
       <span>FECHA: ${fechaActual}</span>
       <span>HORA: ${horaActual}</span>
     </div>
+    
     <div class="divider"></div>
     <div>POSTULANTE:</div>
-    <div style="font-size: 14px; font-weight: 900; margin-bottom: 4px;">
+    <div style="font-size: 13px; font-weight: 900; margin-bottom: 3px; word-break: break-word;">
       ${nombreCompleto}
     </div>
-    <div>DNI: <span style="font-size: 15px;">${postulante.dni}</span></div>
-    <div class="divider"></div>
-    <div class="big-box">
-      <div>AULA DE EVALUACIÓN</div>
-      <div class="big-text">${postulante.aula || 'S/A'}</div>
-      <div>CARPETA Nº: <strong style="font-size: 16px;">${postulante.carpeta || 'S/N'}</strong></div>
+    <div class="row" style="font-size: 12px;">
+      <span>DNI:</span>
+      <span style="font-size: 14px; font-weight: 900;">${postulante.dni}</span>
     </div>
+    <div class="divider"></div>
+
+    <div class="big-box">
+      <div style="font-size: 10px; font-weight: 900; letter-spacing: 0.5px;">AULA DE EVALUACIÓN</div>
+      <div class="big-text">${postulante.aula || 'S/A'}</div>
+      <div>CARPETA Nº: <strong style="font-size: 17px;">${postulante.carpeta || 'S/N'}</strong></div>
+      ${targetPavilion ? `
+      <div style="margin-top: 2px; padding-top: 2px; border-top: 1px dotted #000000; font-size: 10px; font-weight: 900;">
+        PABELLÓN N° ${targetPavilion.num} - ${targetPavilion.name.toUpperCase()}
+      </div>` : ''}
+    </div>
+
     <div class="row">
       <span>SEDE:</span>
       <span>${postulante.sede || 'SEDE CENTRAL'}</span>
     </div>
     <div class="row">
-      <span>GRUPO:</span>
+      <span>GRUPO / ÁREA:</span>
       <span>${postulante.grupo || 'ÚNICO'}</span>
     </div>
-    <div style="margin-top: 4px;">
-      <span>CARRERA:</span>
-      <div style="font-size: 11px;">${postulante.carrera || 'NO ESPECIFICADA'}</div>
+    <div style="margin-top: 2px;">
+      <span>ESCUELA PROFESIONAL:</span>
+      <div style="font-size: 10.5px; font-weight: 800; word-break: break-word;">
+        ${postulante.carrera || 'NO ESPECIFICADA'}
+      </div>
     </div>
+
+    ${isCusco && targetPavilion ? `
+      <div class="divider"></div>
+      <div class="text-center" style="margin: 2px 0;">
+        <div style="font-size: 10px; font-weight: 900; letter-spacing: -0.3px; text-transform: uppercase;">
+          🗺️ CROQUIS DE RUTA A SU PABELLÓN
+        </div>
+        <div style="font-size: 9px; font-weight: 800;">
+          INGRESO: ${doorInfo.label} (${doorInfo.avenue})
+        </div>
+      </div>
+
+      <!-- Croquis Monocromático de Alto Contraste para Ticketera Térmica -->
+      ${croquisSvgHtml}
+
+      <div class="route-box">
+        <strong>ORIENTACIÓN:</strong> ${routeInstructions}
+      </div>
+    ` : ''}
+
     <div class="divider"></div>
-    <div class="text-center" style="font-size: 10px; margin-top: 6px;">
-      [ ✔ ] INGRESO VERIFICADO
+    <div class="text-center" style="font-size: 9.5px; margin-top: 4px;">
+      [ ✔ ] INGRESO VERIFICADO Y CONFORME
       <br>
-      Conserve este ticket para su ubicación
+      Conserve este ticket para su ubicación y control
     </div>
     <br/><br/>
   </body>
@@ -166,10 +283,11 @@ export function savePrinterName(printerName: string) {
 export const printTicket80mm = async (
   postulante: TicketPostulanteData,
   simulacroNombre: string,
-  printerName?: string
+  printerName?: string,
+  selectedDoor?: DoorId | string
 ) => {
   try {
-    const htmlContent = generateTicketHtml(postulante, simulacroNombre);
+    const htmlContent = generateTicketHtml(postulante, simulacroNombre, selectedDoor);
     const chosenPrinter = printerName || getSavedPrinterName() || undefined;
 
     // 1. VÍA ESCRITORIO (ELECTRON): Impresión 100% silenciosa por IPC

@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { User, Simulacro, SimulacroPostulante } from '../types';
-import { printTicket80mm, getAvailablePrinters, getSavedPrinterName, savePrinterName } from '../lib/ticketPrinter';
+import {
+  printTicket80mm,
+  getAvailablePrinters,
+  getSavedPrinterName,
+  savePrinterName,
+  getSavedKioskDoor,
+  saveKioskDoor,
+  type DoorId,
+  OFFICIAL_DOORS,
+  isSedeCusco,
+  normalizeDoorId,
+} from '../lib/ticketPrinter';
 import { playSuccessSound, playErrorSound, playWarningSound } from '../lib/kioskAudio';
 import { SimulacroCalificacionModal } from '../components/SimulacroCalificacionModal';
 
@@ -79,6 +90,11 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
   const [isElectronEnv, setIsElectronEnv] = useState(false);
   const [showTicketVisualPreview, setShowTicketVisualPreview] = useState(false);
 
+  // --- PUERTA DE INGRESO Y CROQUIS CIUDAD UNIVERSITARIA (CUSCO) ---
+  const [selectedDoor, setSelectedDoor] = useState<DoorId>(() => getSavedKioskDoor());
+  const [showDoorModal, setShowDoorModal] = useState(false);
+  const [newSimulacroSede, setNewSimulacroSede] = useState('CUSCO');
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const focusIntervalRef = useRef<any>(null);
 
@@ -124,7 +140,8 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
           hora_ingreso: new Date().toISOString()
         },
         activeSimulacro?.nombre || 'SIMULACRO TEST HARDWARE',
-        selectedPrinter || undefined
+        selectedPrinter || undefined,
+        selectedDoor
       );
       notify?.('Ticket de prueba enviado a la impresora.', 'info');
     } catch (err: any) {
@@ -148,17 +165,39 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
     notify?.('Archivo iniciar_kiosko_web.bat generado y descargado.', 'success');
   };
 
+  const isSimulacroCusco = useCallback((sim: Simulacro | null, postulantsList?: SimulacroPostulante[]): boolean => {
+    if (!sim) return false;
+    if (sim.sede) {
+      return isSedeCusco(sim.sede);
+    }
+    if (sim.sedes_stats) {
+      const sedes = Object.keys(sim.sedes_stats);
+      if (sedes.length > 0) {
+        return sedes.some(s => isSedeCusco(s));
+      }
+    }
+    if (postulantsList && postulantsList.length > 0) {
+      return postulantsList.some(p => isSedeCusco(p.sede));
+    }
+    return true; // Predeterminado para UNSAAC (Sede Central Cusco)
+  }, []);
+
+  const isKioskCusco = useMemo(() => {
+    if (!activeSimulacro) return false;
+    return isSimulacroCusco(activeSimulacro);
+  }, [activeSimulacro, isSimulacroCusco]);
+
   const executeTicketPrint = useCallback((postulante: SimulacroPostulante) => {
     if (!activeSimulacro) return;
     setIsPrinting(true);
-    printTicket80mm(postulante, activeSimulacro.nombre, selectedPrinter || undefined)
+    printTicket80mm(postulante, activeSimulacro.nombre, selectedPrinter || undefined, selectedDoor)
       .catch(err => {
         console.error('Error al imprimir ticket:', err);
       })
       .finally(() => {
         setTimeout(() => setIsPrinting(false), 1200);
       });
-  }, [activeSimulacro, selectedPrinter]);
+  }, [activeSimulacro, selectedPrinter, selectedDoor]);
 
   // =========================================================================
   // CARGA INICIAL Y DATOS DE SIMULACROS
@@ -337,6 +376,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
       nombre: newSimulacroNombre.trim().toUpperCase(),
       fecha: newSimulacroFecha,
       estado: 'Activo' as const,
+      sede: newSimulacroSede.trim().toUpperCase() || 'CUSCO',
     };
 
     let created: Simulacro | null = null;
@@ -381,6 +421,7 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
 
     notify?.(`Simulacro "${created.nombre}" creado exitosamente`, 'success');
     setNewSimulacroNombre('');
+    setNewSimulacroSede('CUSCO');
     setShowCreateModal(false);
   };
 
@@ -862,6 +903,9 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
     }
 
     setIsKioskMode(true);
+    if (isSimulacroCusco(sim, list)) {
+      setShowDoorModal(true);
+    }
   };
 
   const exitKioskMode = () => {
@@ -1220,6 +1264,21 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                   <span className="material-symbols-outlined text-[16px] animate-spin">refresh</span>
                   <span className="hidden sm:inline">Imprimiendo...</span>
                 </div>
+              )}
+
+              {isKioskCusco && (
+                <button
+                  onClick={() => setShowDoorModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black transition-all border bg-amber-500/15 border-amber-500/50 text-amber-300 hover:bg-amber-500/30 active:scale-95 shadow-sm"
+                  title={`Puerta de ingreso: ${OFFICIAL_DOORS[selectedDoor]?.label || 'PUERTA'} (${OFFICIAL_DOORS[selectedDoor]?.avenue || ''}) - Clic para cambiar puerta`}
+                >
+                  <span className="material-symbols-outlined text-[18px] text-amber-400">meeting_room</span>
+                  <span>{OFFICIAL_DOORS[selectedDoor]?.label || 'PUERTA'}</span>
+                  <span className="hidden xl:inline text-[10px] text-amber-300/80 font-normal truncate max-w-[140px]">
+                    ({OFFICIAL_DOORS[selectedDoor]?.avenue})
+                  </span>
+                  <span className="material-symbols-outlined text-[13px] text-amber-400">tune</span>
+                </button>
               )}
 
               <button
@@ -1891,6 +1950,48 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-black uppercase text-slate-500 mb-1">
+                  Sede / Local del Kiosko
+                </label>
+                <input
+                  type="text"
+                  value={newSimulacroSede}
+                  onChange={e => setNewSimulacroSede(e.target.value)}
+                  placeholder="Ej: CUSCO (Sede Central) o Filial (QUILLABAMBA, SICUANI...)"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-primary text-xs font-bold uppercase"
+                />
+                <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                  {isSedeCusco(newSimulacroSede) ? (
+                    <span className="text-emerald-600 font-bold flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[15px]">map</span>
+                      <span>Sede Cusco: Activa selección de puertas y croquis de ruta en tickets 80mm</span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-700 font-bold flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[15px]">domain</span>
+                      <span>Filial externa: Tickets compactos directos sin croquis ni puertas</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {['CUSCO', 'QUILLABAMBA', 'SICUANI', 'ANDAHUAYLAS', 'ESPINAR'].map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setNewSimulacroSede(s)}
+                      className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold uppercase transition-all ${
+                        newSimulacroSede.toUpperCase().trim() === s
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex gap-3 pt-3">
                 <button
                   type="button"
@@ -2514,6 +2615,101 @@ export const PostulantEntryControl: React.FC<PostulantEntryControlProps> = ({ us
         </div>
       )}
     
+      {/* ========================================================================= */}
+      {/* MODAL: SELECCIONAR PUERTA DE INGRESO (KIOSKO CUSCO) */}
+      {/* ========================================================================= */}
+      {showDoorModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-xl w-full p-6 shadow-2xl animate-scale-up text-white">
+            <div className="flex items-start justify-between mb-4 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <span className="material-symbols-outlined text-2xl">meeting_room</span>
+                </div>
+                <div>
+                  <h3 className="text-base font-black uppercase text-white tracking-wide">
+                    Puerta de Ingreso del Kiosko
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Ciudad Universitaria Perayoc (Cusco) • Seleccione su ubicación operativa
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDoorModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                title="Cerrar modal"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 mb-4 leading-relaxed">
+              Los tickets térmicos de 80mm imprimirán automáticamente la ruta peatonal más directa y precisa desde esta puerta hasta el pabellón de examen asignado al postulante:
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+              {(Object.keys(OFFICIAL_DOORS) as DoorId[]).map(doorKey => {
+                const door = OFFICIAL_DOORS[doorKey];
+                const isSelected = selectedDoor === doorKey;
+                return (
+                  <button
+                    key={door.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDoor(doorKey);
+                      saveKioskDoor(doorKey);
+                    }}
+                    className={`text-left p-4 rounded-2xl border transition-all relative flex flex-col justify-between ${
+                      isSelected
+                        ? 'bg-amber-500/15 border-amber-400 shadow-lg shadow-amber-500/10 ring-2 ring-amber-400/50'
+                        : 'bg-slate-800/60 border-slate-700 hover:border-slate-500 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-sm font-black uppercase tracking-wider ${
+                        isSelected ? 'text-amber-400' : 'text-white'
+                      }`}>
+                        {door.label}
+                      </span>
+                      {isSelected ? (
+                        <span className="size-5 rounded-full bg-amber-400 text-slate-950 flex items-center justify-center text-xs font-black shadow-sm">
+                          ✓
+                        </span>
+                      ) : (
+                        <span className="size-5 rounded-full border border-slate-600"></span>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-slate-200">
+                        {door.avenue}
+                      </p>
+                      <p className="text-[11px] text-slate-400 italic">
+                        {door.reference}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDoorModal(false);
+                  notify?.(`Kiosko posicionado en ${OFFICIAL_DOORS[selectedDoor]?.label} (${OFFICIAL_DOORS[selectedDoor]?.avenue})`, 'success');
+                }}
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs uppercase tracking-wider transition-all shadow-lg shadow-amber-500/20 active:scale-95 flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                <span>Confirmar Ubicación ({OFFICIAL_DOORS[selectedDoor]?.label})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ========================================================================= */}
       {/* MODAL: CALIFICACIÓN Y RESULTADOS DEL SIMULACRO */}
       {/* ========================================================================= */}
