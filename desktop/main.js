@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -62,6 +62,144 @@ function startBiometricBridge() {
   }
 }
 
+
+// --- Gestión y Persistencia de Nivel de Zoom ---
+function getZoomConfigFile() {
+  try {
+    return path.join(app.getPath("userData"), "zoom-config.json");
+  } catch (e) {
+    return null;
+  }
+}
+
+function loadSavedZoom() {
+  try {
+    const file = getZoomConfigFile();
+    if (file && fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (typeof data.zoomFactor === "number" && data.zoomFactor >= 0.4 && data.zoomFactor <= 3.0) {
+        return data.zoomFactor;
+      }
+    }
+  } catch (e) {}
+  return 1.0;
+}
+
+function saveZoom(factor) {
+  try {
+    const file = getZoomConfigFile();
+    if (file) {
+      fs.writeFileSync(file, JSON.stringify({ zoomFactor: factor }), "utf8");
+    }
+  } catch (e) {}
+}
+
+function adjustZoom(delta, reset = false) {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!win || !win.webContents) return;
+
+  if (reset) {
+    win.webContents.setZoomFactor(1.0);
+    saveZoom(1.0);
+    console.log("[Electron Main] Zoom restablecido a 100%");
+    return;
+  }
+
+  const currentZoom = win.webContents.getZoomFactor();
+  let nextZoom = Number((currentZoom + delta).toFixed(2));
+  if (nextZoom < 0.4) nextZoom = 0.4;
+  if (nextZoom > 3.0) nextZoom = 3.0;
+
+  win.webContents.setZoomFactor(nextZoom);
+  saveZoom(nextZoom);
+  console.log(`[Electron Main] Zoom ajustado a: ${Math.round(nextZoom * 100)}%`);
+}
+
+function setupApplicationMenu() {
+  const isMac = process.platform === "darwin";
+
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about", label: "Acerca de" },
+              { type: "separator" },
+              { role: "services", label: "Servicios" },
+              { type: "separator" },
+              { role: "hide", label: "Ocultar" },
+              { role: "hideOthers", label: "Ocultar otros" },
+              { role: "unhide", label: "Mostrar todos" },
+              { type: "separator" },
+              { role: "quit", label: "Salir" }
+            ]
+          }
+        ]
+      : []),
+    {
+      label: "Archivo",
+      submenu: [
+        isMac ? { role: "close", label: "Cerrar ventana" } : { role: "quit", label: "Salir" }
+      ]
+    },
+    {
+      label: "Edición",
+      submenu: [
+        { role: "undo", label: "Deshacer" },
+        { role: "redo", label: "Rehacer" },
+        { type: "separator" },
+        { role: "cut", label: "Cortar" },
+        { role: "copy", label: "Copiar" },
+        { role: "paste", label: "Pegar" },
+        { role: "selectAll", label: "Seleccionar todo" }
+      ]
+    },
+    {
+      label: "Ver",
+      submenu: [
+        {
+          label: "Acercar (Zoom +)",
+          accelerator: "CmdOrCtrl+Plus",
+          click: () => adjustZoom(0.1)
+        },
+        {
+          label: "Alejar (Zoom -)",
+          accelerator: "CmdOrCtrl+-",
+          click: () => adjustZoom(-0.1)
+        },
+        {
+          label: "Tamaño Original (100%)",
+          accelerator: "CmdOrCtrl+0",
+          click: () => adjustZoom(0, true)
+        },
+        { type: "separator" },
+        { role: "reload", label: "Recargar" },
+        { role: "forceReload", label: "Forzar Recarga" },
+        { role: "toggleDevTools", label: "Herramientas de Desarrollador" },
+        { type: "separator" },
+        { role: "togglefullscreen", label: "Pantalla Completa" }
+      ]
+    },
+    {
+      label: "Ventana",
+      submenu: [
+        { role: "minimize", label: "Minimizar" },
+        { role: "zoom", label: "Maximizar" },
+        ...(isMac
+          ? [
+              { type: "separator" },
+              { role: "front", label: "Traer al frente" }
+            ]
+          : [{ role: "close", label: "Cerrar" }])
+      ]
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
 // 2. Crear Ventana Principal con Recuperación Automática en caso de fallo
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -108,6 +246,50 @@ function createWindow() {
     });
   }
   
+  
+  // Restaurar el factor de zoom guardado al cargar la página
+  mainWindow.webContents.on("did-finish-load", () => {
+    const savedZoom = loadSavedZoom();
+    if (savedZoom !== 1.0) {
+      mainWindow.webContents.setZoomFactor(savedZoom);
+      console.log(`[Electron Main] Factor de zoom restaurado a: ${Math.round(savedZoom * 100)}%`);
+    }
+  });
+
+  // Interceptor universal de atajos de teclado para Zoom (Ctrl++, Ctrl+-, Ctrl+0)
+  // Compatible con teclado en español, teclado numérico y atajos de accesibilidad
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if ((input.control || input.meta) && input.type === "keyDown") {
+      // Zoom In: '+' o '=' o '+' en teclado numérico o código Equal / NumpadAdd
+      if (
+        input.key === "+" ||
+        input.key === "=" ||
+        input.code === "NumpadAdd" ||
+        input.code === "Equal" ||
+        input.key === "Add"
+      ) {
+        adjustZoom(0.1);
+        event.preventDefault();
+      }
+      // Zoom Out: '-' o '_' o '-' en teclado numérico o código Minus / NumpadSubtract
+      else if (
+        input.key === "-" ||
+        input.key === "_" ||
+        input.code === "NumpadSubtract" ||
+        input.code === "Minus" ||
+        input.key === "Subtract"
+      ) {
+        adjustZoom(-0.1);
+        event.preventDefault();
+      }
+      // Reset Zoom: '0' o '0' en teclado numérico
+      else if (input.key === "0" || input.code === "Digit0" || input.code === "Numpad0") {
+        adjustZoom(0, true);
+        event.preventDefault();
+      }
+    }
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -201,6 +383,7 @@ function setupAutoUpdater() {
 app.whenReady().then(() => {
   startBackend();
   startBiometricBridge();
+  setupApplicationMenu();
   createWindow();
   setupAutoUpdater();
   
