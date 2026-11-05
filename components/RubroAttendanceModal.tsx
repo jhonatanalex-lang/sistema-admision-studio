@@ -369,7 +369,8 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
           hora: newRecordToInsert.hora,
           firma: newRecordToInsert.firma,
           timestamp: newRecordToInsert.timestamp,
-          manual: newRecordToInsert.manual || false
+          manual: newRecordToInsert.manual || false,
+          metodo_validacion: newRecordToInsert.metodo_validacion || (newRecordToInsert.manual ? 'MANUAL' : 'SOLO_FIRMA')
         };
 
         if (procesoIdClean) {
@@ -584,7 +585,8 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       hora: formattedHora,
       firma: finalFirma,
       timestamp: timestampIso,
-      manual: true
+      manual: true,
+      metodo_validacion: 'MANUAL'
     };
 
     const updatedRecords = [newRecord, ...records];
@@ -1227,11 +1229,19 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                         </div>
 
                         <div className="text-right flex flex-col items-end">
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                            r.tipo === 'INGRESO' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}>
-                            {r.tipo}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                              r.tipo === 'INGRESO' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                            }`}>
+                              {r.tipo}
+                            </span>
+                            {r.metodo_validacion === 'HUELLA_Y_FIRMA' && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-0.5" title="Validado con Huella Digital">
+                                <span className="material-symbols-outlined text-[11px]">fingerprint</span>
+                                Huella
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[11px] font-mono font-bold text-slate-700 mt-1">
                             {r.hora}
                           </span>

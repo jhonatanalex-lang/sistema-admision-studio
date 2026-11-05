@@ -25,6 +25,7 @@ export const BiometricEnrollModal: React.FC<Props> = ({ isOpen, onClose, person,
   const [step, setStep] = useState<Step>('CHECKING');
   const [loading, setLoading] = useState(false);
   const [existingTemplate, setExistingTemplate] = useState<string | null>(null);
+  const [existingTemplateId, setExistingTemplateId] = useState<string | null>(null);
   const [biometricBaseUrl, setBiometricBaseUrl] = useState('http://localhost:8081');
   const [isServiceOnline, setIsServiceOnline] = useState<boolean | null>(null);
   
@@ -85,9 +86,11 @@ export const BiometricEnrollModal: React.FC<Props> = ({ isOpen, onClose, person,
 
       if (data && data.length > 0 && data[0].template_base64) {
         setExistingTemplate(data[0].template_base64);
+        setExistingTemplateId(data[0].id || null);
         setStep('HAS_FINGERPRINT');
       } else {
         setExistingTemplate(null);
+    setExistingTemplateId(null);
         setStep('NO_FINGERPRINT');
       }
     } catch (err: any) {
@@ -197,18 +200,49 @@ export const BiometricEnrollModal: React.FC<Props> = ({ isOpen, onClose, person,
       setSamplesCollected(4);
       setEnrollMessage('Actualizando plantilla única en base de datos...');
 
-      // Guardar plantilla en base de datos con upsert y onConflict exacto
-      const { error } = await supabase.from('fingerprint_templates').upsert({
+      // Guardar plantilla en base de datos de manera robusta (UPDATE si ya existe por ID o DNI, o INSERT si es nueva)
+      const cleanDni = person?.dni ? String(person.dni).trim() : '';
+      const payloadTemplate = {
         personal_id: person.id,
-        dni: person.dni.trim(),
+        dni: cleanDni,
         finger_name: 'Índice Derecho',
         finger_index: 1,
         template_base64: templateBase64,
         updated_at: new Date().toISOString()
-      }, { onConflict: 'personal_id,finger_index' });
+      };
 
-      if (error) {
-        throw new Error(`Error guardando en base de datos: ${error.message}`);
+      let targetId = existingTemplateId;
+      if (!targetId) {
+        const { data: found } = await supabase
+          .from('fingerprint_templates')
+          .select('id')
+          .eq('dni', cleanDni)
+          .limit(1);
+        if (found && found.length > 0) {
+          targetId = found[0].id;
+        }
+      }
+
+      let saveError = null;
+      if (targetId) {
+        const { error: updErr } = await supabase
+          .from('fingerprint_templates')
+          .update(payloadTemplate)
+          .eq('id', targetId);
+        saveError = updErr;
+      } else {
+        const { data: insData, error: insErr } = await supabase
+          .from('fingerprint_templates')
+          .insert([payloadTemplate])
+          .select('id');
+        saveError = insErr;
+        if (insData && insData.length > 0) {
+          setExistingTemplateId(insData[0].id);
+        }
+      }
+
+      if (saveError) {
+        throw new Error(`Error guardando en base de datos: ${saveError.message}`);
       }
 
       // Update state locally
