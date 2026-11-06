@@ -359,10 +359,10 @@
 
     <!-- Mode Selector Tabs -->
     <div class="mode-tabs">
-      <button id="tab-pavilions" class="mode-tab active" onclick="switchMode('pavilions')">
+      <button id="tab-pavilions" class="mode-tab" onclick="switchMode('pavilions')">
         🏢 Pabellones y Puertas
       </button>
-      <button id="tab-walkways" class="mode-tab" onclick="switchMode('walkways')">
+      <button id="tab-walkways" class="mode-tab active" onclick="switchMode('walkways')">
         🛣️ Trazador Libre de Vías
       </button>
     </div>
@@ -391,7 +391,7 @@
     <div class="left-sidebar">
       
       <!-- Panel 1: Pabellones -->
-      <div id="sidebar-pavilions" style="display: flex; flex-direction: column; height: 100%;">
+      <div id="sidebar-pavilions" style="display: none; flex-direction: column; height: 100%;">
         <div class="sidebar-header">
           <h2>Pabellones (<span id="pab-count">0</span>)</h2>
           <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10.5px;" onclick="addNewPavilion()">
@@ -405,7 +405,7 @@
       </div>
 
       <!-- Panel 2: Trazador Libre de Vías Peatonales -->
-      <div id="sidebar-walkways" style="display: none; flex-direction: column; height: 100%;">
+      <div id="sidebar-walkways" style="display: flex; flex-direction: column; height: 100%;">
         <div class="sidebar-header">
           <h2>Herramientas de Vías</h2>
           <span class="badge" id="walkways-count-badge">0 puntos</span>
@@ -561,7 +561,7 @@
     <div class="right-sidebar">
       
       <!-- Sección: Propiedades del Pabellón Seleccionado -->
-      <div class="panel-section" id="section-pav-props">
+      <div class="panel-section" id="section-pav-props" style="display: none;">
         <div class="section-title">
           <span>Propiedades Pabellón</span>
           <button id="btn-delete" class="btn btn-danger" style="padding: 2px 7px; font-size: 10px;" onclick="deleteSelectedPavilion()">
@@ -700,33 +700,432 @@
 
     // Red de vías por defecto limpia
     const DEFAULT_WALKWAY_NETWORK = {
-      nodes: [
-        { id: 'p_p6', x: 75, y: 173, label: 'P6 Acceso' },
-        { id: 'p_p4', x: 201, y: 365, label: 'P4 Acceso' },
-        { id: 'p_p2', x: 390, y: 365, label: 'P2 Acceso' },
-        { id: 'p_p1', x: 505, y: 294, label: 'P1 Acceso' },
-        { id: 'w_corredor_sur', x: 280, y: 365, label: 'Vía Sur' },
-        { id: 'w_plaza_central', x: 280, y: 215, label: 'Plaza Central' },
-        { id: 'w_bulevar_este', x: 380, y: 215, label: 'Bulevar Central' },
-        { id: 'w_corredor_arq', x: 201, y: 145, label: 'Pasaje Arq' }
-      ],
-      edges: [
-        { id: 'e_p4_sur', from: 'p_p4', to: 'w_corredor_sur', bidirectional: true },
-        { id: 'e_sur_p2', from: 'w_corredor_sur', to: 'p_p2', bidirectional: true },
-        { id: 'e_sur_plaza', from: 'w_corredor_sur', to: 'w_plaza_central', bidirectional: true },
-        { id: 'e_plaza_bulevar', from: 'w_plaza_central', to: 'w_bulevar_este', bidirectional: true },
-        { id: 'e_p6_plaza', from: 'p_p6', to: 'w_plaza_central', bidirectional: true },
-        { id: 'e_p6_arq', from: 'p_p6', to: 'w_corredor_arq', bidirectional: true },
-        { id: 'e_bulevar_p1', from: 'w_bulevar_este', to: 'p_p1', bidirectional: true }
-      ]
-    };
+  "nodes": [
+    {
+      "id": "p4_door",
+      "x": 201,
+      "y": 389,
+      "label": "Puerta 4"
+    },
+    {
+      "id": "p2_door",
+      "x": 390,
+      "y": 384,
+      "label": "Puerta 2"
+    },
+    {
+      "id": "p6_door",
+      "x": 39,
+      "y": 173,
+      "label": "Puerta 6"
+    },
+    {
+      "id": "p1_door",
+      "x": 539,
+      "y": 294,
+      "label": "Puerta 1"
+    },
+    {
+      "id": "c_p4",
+      "x": 201,
+      "y": 365,
+      "label": "Calzada Sur P4"
+    },
+    {
+      "id": "c_s1",
+      "x": 242,
+      "y": 365,
+      "label": "Calzada Sur Farmacia"
+    },
+    {
+      "id": "c_s2",
+      "x": 280,
+      "y": 365,
+      "label": "Calzada Sur Contabilidad"
+    },
+    {
+      "id": "c_p2",
+      "x": 380,
+      "y": 365,
+      "label": "Calzada Sur P2"
+    },
+    {
+      "id": "c_s3",
+      "x": 505,
+      "y": 365,
+      "label": "Calzada Sur Este"
+    },
+    {
+      "id": "w_s",
+      "x": 75,
+      "y": 365,
+      "label": "Corredor Oeste Sur"
+    },
+    {
+      "id": "w_mid",
+      "x": 75,
+      "y": 248,
+      "label": "Corredor Oeste Sociales"
+    },
+    {
+      "id": "w_p6",
+      "x": 75,
+      "y": 173,
+      "label": "Corredor Oeste P6"
+    },
+    {
+      "id": "w_n",
+      "x": 75,
+      "y": 75,
+      "label": "Corredor Oeste Norte"
+    },
+    {
+      "id": "cv_farm",
+      "x": 201,
+      "y": 345,
+      "label": "Eje Oeste Farmacia"
+    },
+    {
+      "id": "cv_soc",
+      "x": 201,
+      "y": 248,
+      "label": "Eje Oeste Sociales"
+    },
+    {
+      "id": "cv_mid",
+      "x": 201,
+      "y": 215,
+      "label": "Eje Oeste Central"
+    },
+    {
+      "id": "cv_quim",
+      "x": 201,
+      "y": 188,
+      "label": "Eje Oeste Quimica"
+    },
+    {
+      "id": "cv_arq",
+      "x": 201,
+      "y": 145,
+      "label": "Eje Oeste Arquitectura"
+    },
+    {
+      "id": "cv_n",
+      "x": 201,
+      "y": 75,
+      "label": "Eje Oeste Norte"
+    },
+    {
+      "id": "plz_biol",
+      "x": 240,
+      "y": 215,
+      "label": "Plaza Biologia"
+    },
+    {
+      "id": "plz_cen",
+      "x": 300,
+      "y": 215,
+      "label": "Plaza Central"
+    },
+    {
+      "id": "bv_mid",
+      "x": 380,
+      "y": 215,
+      "label": "Bulevar Central"
+    },
+    {
+      "id": "bv_inf",
+      "x": 380,
+      "y": 335,
+      "label": "Bulevar Informatica"
+    },
+    {
+      "id": "bv_enf",
+      "x": 380,
+      "y": 297,
+      "label": "Bulevar Enfermeria"
+    },
+    {
+      "id": "bv_minas",
+      "x": 380,
+      "y": 257,
+      "label": "Bulevar Minas"
+    },
+    {
+      "id": "bv_elec",
+      "x": 380,
+      "y": 183,
+      "label": "Bulevar Electrica"
+    },
+    {
+      "id": "bv_electr",
+      "x": 380,
+      "y": 158,
+      "label": "Bulevar Electronica"
+    },
+    {
+      "id": "bv_cepru",
+      "x": 380,
+      "y": 121,
+      "label": "Bulevar Cepru"
+    },
+    {
+      "id": "bv_n",
+      "x": 380,
+      "y": 75,
+      "label": "Bulevar Norte"
+    },
+    {
+      "id": "e_p1",
+      "x": 505,
+      "y": 294,
+      "label": "Eje Este P1"
+    },
+    {
+      "id": "e_mid",
+      "x": 505,
+      "y": 200,
+      "label": "Eje Este Medio"
+    },
+    {
+      "id": "e_comun",
+      "x": 505,
+      "y": 114,
+      "label": "Eje Este Comunicacion"
+    },
+    {
+      "id": "e_n",
+      "x": 505,
+      "y": 75,
+      "label": "Eje Este Norte"
+    },
+    {
+      "id": "n_civil",
+      "x": 275,
+      "y": 75,
+      "label": "Eje Norte Civil"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_dp4",
+      "from": "p4_door",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_dp2",
+      "from": "p2_door",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_dp6",
+      "from": "p6_door",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_dp1",
+      "from": "p1_door",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_cs0",
+      "from": "w_s",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_cs1",
+      "from": "c_p4",
+      "to": "c_s1"
+    },
+    {
+      "id": "e_cs2",
+      "from": "c_s1",
+      "to": "c_s2"
+    },
+    {
+      "id": "e_cs3",
+      "from": "c_s2",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_cs4",
+      "from": "c_p2",
+      "to": "c_s3"
+    },
+    {
+      "id": "e_cs5",
+      "from": "c_s3",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_w1",
+      "from": "w_s",
+      "to": "w_mid"
+    },
+    {
+      "id": "e_w2",
+      "from": "w_mid",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_w3",
+      "from": "w_p6",
+      "to": "w_n"
+    },
+    {
+      "id": "e_w4",
+      "from": "w_n",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_w5",
+      "from": "w_p6",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_w6",
+      "from": "w_mid",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv0",
+      "from": "c_p4",
+      "to": "cv_farm"
+    },
+    {
+      "id": "e_cv1",
+      "from": "cv_farm",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv2",
+      "from": "cv_soc",
+      "to": "cv_mid"
+    },
+    {
+      "id": "e_cv3",
+      "from": "cv_mid",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_cv4",
+      "from": "cv_quim",
+      "to": "cv_arq"
+    },
+    {
+      "id": "e_cv5",
+      "from": "cv_arq",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_plz1",
+      "from": "cv_mid",
+      "to": "plz_biol"
+    },
+    {
+      "id": "e_plz2",
+      "from": "plz_biol",
+      "to": "plz_cen"
+    },
+    {
+      "id": "e_plz3",
+      "from": "plz_cen",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv0",
+      "from": "c_p2",
+      "to": "bv_inf"
+    },
+    {
+      "id": "e_bv1",
+      "from": "bv_inf",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_bv2",
+      "from": "bv_enf",
+      "to": "bv_minas"
+    },
+    {
+      "id": "e_bv3",
+      "from": "bv_minas",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv4",
+      "from": "bv_mid",
+      "to": "bv_elec"
+    },
+    {
+      "id": "e_bv5",
+      "from": "bv_elec",
+      "to": "bv_electr"
+    },
+    {
+      "id": "e_bv6",
+      "from": "bv_electr",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_bv7",
+      "from": "bv_cepru",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_e1",
+      "from": "e_p1",
+      "to": "e_mid"
+    },
+    {
+      "id": "e_e2",
+      "from": "e_mid",
+      "to": "e_comun"
+    },
+    {
+      "id": "e_e3",
+      "from": "e_comun",
+      "to": "e_n"
+    },
+    {
+      "id": "e_e4",
+      "from": "e_p1",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_e5",
+      "from": "e_mid",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_e6",
+      "from": "e_comun",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_n1",
+      "from": "cv_n",
+      "to": "n_civil"
+    },
+    {
+      "id": "e_n2",
+      "from": "n_civil",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_n3",
+      "from": "bv_n",
+      "to": "e_n"
+    }
+  ]
+};
 
     let doors = JSON.parse(JSON.stringify(INITIAL_DOORS));
     let pavilions = JSON.parse(JSON.stringify(INITIAL_PAVILIONS));
-    let walkways = { nodes: [], edges: [] };
+    let walkways = JSON.parse(JSON.stringify(DEFAULT_WALKWAY_NETWORK));
 
     let selectedPavilionCode = pavilions[0]?.code || null;
-    let currentMode = 'pavilions'; // 'pavilions' | 'walkways'
+    let currentMode = 'walkways'; // 'pavilions' | 'walkways'
     
     // Subherramienta de Vías: 'select' | 'draw' | 'add_node' | 'connect' | 'erase'
     let walkwayTool = 'select';
@@ -1005,7 +1404,7 @@
               font-family="'Segoe UI', Arial, sans-serif" font-size="9" font-weight="800" text-anchor="middle">${p.short}</text>
 
             <!-- Pin de Entrada -->
-            <circle class="entry-pin" data-pin-code="${p.code}" cx="${p.entryX}" cy="${p.entryY}" r="5" fill="#10b981" stroke="#ffffff" stroke-width="1.8" />
+            <circle class="entry-pin" data-pin-code="${p.code}" cx="${p.entryX}" cy="${p.entryY}" r="6.5" fill="#10b981" stroke="#ffffff" stroke-width="2" style="pointer-events: auto; cursor: pointer;" title="Acceso a ${p.short} (clic para conectar vía)" />
             <line x1="${cx}" y1="${cy}" x2="${p.entryX}" y2="${p.entryY}" stroke="#10b981" stroke-width="1.2" stroke-dasharray="3,2" pointer-events="none" />
 
             <!-- Tirador de Resize si está seleccionado -->
@@ -1127,6 +1526,56 @@
         // MODO VÍAS PEATONALES CON SUBHERRAMIENTAS CLARAS
         // ==========================================
         if (currentMode === 'walkways') {
+          // Detección de clic en Pin de Entrada de Pabellón para conectar caminos directamente al edificio
+          const pinEl = e.target.closest('.entry-pin');
+          if (pinEl) {
+            const pinCode = pinEl.getAttribute('data-pin-code');
+            const pav = pavilions.find(p => p.code === pinCode);
+            if (pav) {
+              const pinNodeId = 'entry_' + pav.code;
+              let pinNode = walkways.nodes.find(n => n.id === pinNodeId);
+              if (!pinNode) {
+                pinNode = { id: pinNodeId, x: pav.entryX, y: pav.entryY, label: 'Acceso ' + pav.short };
+                walkways.nodes.push(pinNode);
+              }
+
+              if (walkwayTool === 'connect') {
+                if (!connectSourceNodeId) {
+                  connectSourceNodeId = pinNodeId;
+                  showToast('Acceso a ' + pav.short + ' seleccionado. Haz clic en un punto de la vía para unirlo.');
+                  renderWalkwaysLayer();
+                } else if (connectSourceNodeId !== pinNodeId) {
+                  const edId = 'e_' + connectSourceNodeId + '_' + pinNodeId;
+                  const exists = walkways.edges.some(ed => 
+                    (ed.from === connectSourceNodeId && ed.to === pinNodeId) ||
+                    (ed.from === pinNodeId && ed.to === connectSourceNodeId)
+                  );
+                  if (!exists) {
+                    walkways.edges.push({ id: edId, from: connectSourceNodeId, to: pinNodeId, bidirectional: true });
+                    showToast('¡Vía conectada al pabellón ' + pav.short + '!');
+                    saveLocal();
+                  }
+                  connectSourceNodeId = null;
+                  renderSvgLayers();
+                  updateSimTicket();
+                }
+                e.stopPropagation();
+                return;
+              } else if (walkwayTool === 'draw') {
+                if (activeChainNodeId && activeChainNodeId !== pinNodeId) {
+                  const edId = 'e_' + activeChainNodeId + '_' + pinNodeId;
+                  walkways.edges.push({ id: edId, from: activeChainNodeId, to: pinNodeId, bidirectional: true });
+                  showToast('¡Camino conectado a la entrada de ' + pav.short + '!');
+                }
+                activeChainNodeId = pinNodeId;
+                saveLocal();
+                renderSvgLayers();
+                updateSimTicket();
+                e.stopPropagation();
+                return;
+              }
+            }
+          }
           const nodeGroup = e.target.closest('.walkway-node');
           const edgeGroup = e.target.closest('.walkway-edge');
           const nodeId = nodeGroup?.getAttribute('data-node-id');

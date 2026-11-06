@@ -93,7 +93,7 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
     "y": 89,
     "w": 85,
     "h": 32,
-    "entryX": 195,
+    "entryX": 204,
     "entryY": 144,
     "keywords": [
       "arquitectura",
@@ -281,12 +281,12 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
     "num": 16,
     "name": "Pabellón C (Aulas Generales)",
     "short": "BIOLOGIA",
-    "x": 236,
-    "y": 172,
+    "x": 237,
+    "y": 173,
     "w": 55,
     "h": 34,
-    "entryX": 235,
-    "entryY": 179,
+    "entryX": 236,
+    "entryY": 180,
     "keywords": [
       "pabellon c",
       "pabellón c",
@@ -386,14 +386,14 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
   {
     "code": "PAB_5284",
     "num": 46,
-    "name": "Nuevo Pabellón 46",
+    "name": "ING. ELECTRONICA",
     "short": "ING. ELECTRONICA",
     "x": 394,
-    "y": 133,
+    "y": 129,
     "w": 106,
     "h": 30,
-    "entryX": 382,
-    "entryY": 158,
+    "entryX": 389,
+    "entryY": 161,
     "keywords": [
       "nuevo",
       "pab_5284"
@@ -430,31 +430,422 @@ export interface CampusMapConfig {
 export const DEFAULT_WALKWAY_NETWORK: WalkwayNetwork = {
   "nodes": [
     {
-      "id": "p_p6",
-      "x": 75,
-      "y": 173,
-      "label": "P6 Acceso"
+      "id": "p4_door",
+      "x": 201,
+      "y": 389,
+      "label": "Puerta 4"
     },
     {
-      "id": "p_p4",
+      "id": "p2_door",
+      "x": 390,
+      "y": 384,
+      "label": "Puerta 2"
+    },
+    {
+      "id": "p6_door",
+      "x": 39,
+      "y": 173,
+      "label": "Puerta 6"
+    },
+    {
+      "id": "p1_door",
+      "x": 539,
+      "y": 294,
+      "label": "Puerta 1"
+    },
+    {
+      "id": "c_p4",
       "x": 201,
       "y": 365,
-      "label": "P4 Acceso"
+      "label": "Calzada Sur P4"
     },
     {
-      "id": "p_p2",
-      "x": 390,
+      "id": "c_s1",
+      "x": 242,
       "y": 365,
-      "label": "P2 Acceso"
+      "label": "Calzada Sur Farmacia"
     },
     {
-      "id": "p_p1",
+      "id": "c_s2",
+      "x": 280,
+      "y": 365,
+      "label": "Calzada Sur Contabilidad"
+    },
+    {
+      "id": "c_p2",
+      "x": 380,
+      "y": 365,
+      "label": "Calzada Sur P2"
+    },
+    {
+      "id": "c_s3",
+      "x": 505,
+      "y": 365,
+      "label": "Calzada Sur Este"
+    },
+    {
+      "id": "w_s",
+      "x": 75,
+      "y": 365,
+      "label": "Corredor Oeste Sur"
+    },
+    {
+      "id": "w_mid",
+      "x": 75,
+      "y": 248,
+      "label": "Corredor Oeste Sociales"
+    },
+    {
+      "id": "w_p6",
+      "x": 75,
+      "y": 173,
+      "label": "Corredor Oeste P6"
+    },
+    {
+      "id": "w_n",
+      "x": 75,
+      "y": 75,
+      "label": "Corredor Oeste Norte"
+    },
+    {
+      "id": "cv_farm",
+      "x": 201,
+      "y": 345,
+      "label": "Eje Oeste Farmacia"
+    },
+    {
+      "id": "cv_soc",
+      "x": 201,
+      "y": 248,
+      "label": "Eje Oeste Sociales"
+    },
+    {
+      "id": "cv_mid",
+      "x": 201,
+      "y": 215,
+      "label": "Eje Oeste Central"
+    },
+    {
+      "id": "cv_quim",
+      "x": 201,
+      "y": 188,
+      "label": "Eje Oeste Quimica"
+    },
+    {
+      "id": "cv_arq",
+      "x": 201,
+      "y": 145,
+      "label": "Eje Oeste Arquitectura"
+    },
+    {
+      "id": "cv_n",
+      "x": 201,
+      "y": 75,
+      "label": "Eje Oeste Norte"
+    },
+    {
+      "id": "plz_biol",
+      "x": 240,
+      "y": 215,
+      "label": "Plaza Biologia"
+    },
+    {
+      "id": "plz_cen",
+      "x": 300,
+      "y": 215,
+      "label": "Plaza Central"
+    },
+    {
+      "id": "bv_mid",
+      "x": 380,
+      "y": 215,
+      "label": "Bulevar Central"
+    },
+    {
+      "id": "bv_inf",
+      "x": 380,
+      "y": 335,
+      "label": "Bulevar Informatica"
+    },
+    {
+      "id": "bv_enf",
+      "x": 380,
+      "y": 297,
+      "label": "Bulevar Enfermeria"
+    },
+    {
+      "id": "bv_minas",
+      "x": 380,
+      "y": 257,
+      "label": "Bulevar Minas"
+    },
+    {
+      "id": "bv_elec",
+      "x": 380,
+      "y": 183,
+      "label": "Bulevar Electrica"
+    },
+    {
+      "id": "bv_electr",
+      "x": 380,
+      "y": 158,
+      "label": "Bulevar Electronica"
+    },
+    {
+      "id": "bv_cepru",
+      "x": 380,
+      "y": 121,
+      "label": "Bulevar Cepru"
+    },
+    {
+      "id": "bv_n",
+      "x": 380,
+      "y": 75,
+      "label": "Bulevar Norte"
+    },
+    {
+      "id": "e_p1",
       "x": 505,
       "y": 294,
-      "label": "P1 Acceso"
+      "label": "Eje Este P1"
+    },
+    {
+      "id": "e_mid",
+      "x": 505,
+      "y": 200,
+      "label": "Eje Este Medio"
+    },
+    {
+      "id": "e_comun",
+      "x": 505,
+      "y": 114,
+      "label": "Eje Este Comunicacion"
+    },
+    {
+      "id": "e_n",
+      "x": 505,
+      "y": 75,
+      "label": "Eje Este Norte"
+    },
+    {
+      "id": "n_civil",
+      "x": 275,
+      "y": 75,
+      "label": "Eje Norte Civil"
     }
   ],
-  "edges": []
+  "edges": [
+    {
+      "id": "e_dp4",
+      "from": "p4_door",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_dp2",
+      "from": "p2_door",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_dp6",
+      "from": "p6_door",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_dp1",
+      "from": "p1_door",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_cs0",
+      "from": "w_s",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_cs1",
+      "from": "c_p4",
+      "to": "c_s1"
+    },
+    {
+      "id": "e_cs2",
+      "from": "c_s1",
+      "to": "c_s2"
+    },
+    {
+      "id": "e_cs3",
+      "from": "c_s2",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_cs4",
+      "from": "c_p2",
+      "to": "c_s3"
+    },
+    {
+      "id": "e_cs5",
+      "from": "c_s3",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_w1",
+      "from": "w_s",
+      "to": "w_mid"
+    },
+    {
+      "id": "e_w2",
+      "from": "w_mid",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_w3",
+      "from": "w_p6",
+      "to": "w_n"
+    },
+    {
+      "id": "e_w4",
+      "from": "w_n",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_w5",
+      "from": "w_p6",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_w6",
+      "from": "w_mid",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv0",
+      "from": "c_p4",
+      "to": "cv_farm"
+    },
+    {
+      "id": "e_cv1",
+      "from": "cv_farm",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv2",
+      "from": "cv_soc",
+      "to": "cv_mid"
+    },
+    {
+      "id": "e_cv3",
+      "from": "cv_mid",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_cv4",
+      "from": "cv_quim",
+      "to": "cv_arq"
+    },
+    {
+      "id": "e_cv5",
+      "from": "cv_arq",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_plz1",
+      "from": "cv_mid",
+      "to": "plz_biol"
+    },
+    {
+      "id": "e_plz2",
+      "from": "plz_biol",
+      "to": "plz_cen"
+    },
+    {
+      "id": "e_plz3",
+      "from": "plz_cen",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv0",
+      "from": "c_p2",
+      "to": "bv_inf"
+    },
+    {
+      "id": "e_bv1",
+      "from": "bv_inf",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_bv2",
+      "from": "bv_enf",
+      "to": "bv_minas"
+    },
+    {
+      "id": "e_bv3",
+      "from": "bv_minas",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv4",
+      "from": "bv_mid",
+      "to": "bv_elec"
+    },
+    {
+      "id": "e_bv5",
+      "from": "bv_elec",
+      "to": "bv_electr"
+    },
+    {
+      "id": "e_bv6",
+      "from": "bv_electr",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_bv7",
+      "from": "bv_cepru",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_e1",
+      "from": "e_p1",
+      "to": "e_mid"
+    },
+    {
+      "id": "e_e2",
+      "from": "e_mid",
+      "to": "e_comun"
+    },
+    {
+      "id": "e_e3",
+      "from": "e_comun",
+      "to": "e_n"
+    },
+    {
+      "id": "e_e4",
+      "from": "e_p1",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_e5",
+      "from": "e_mid",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_e6",
+      "from": "e_comun",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_n1",
+      "from": "cv_n",
+      "to": "n_civil"
+    },
+    {
+      "id": "e_n2",
+      "from": "n_civil",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_n3",
+      "from": "bv_n",
+      "to": "e_n"
+    }
+  ]
 };
 
 // Configuración viva en memoria sincronizada con Supabase Cloud y safeStorage
