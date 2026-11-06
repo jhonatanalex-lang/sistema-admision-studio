@@ -5,6 +5,9 @@
  * Tipografía ampliada de alta legibilidad, números oficiales y trazado grueso de rutas.
  */
 
+import { supabase } from './supabaseClient';
+import { safeStorage } from './safeStorage';
+
 export type DoorId = 'P1' | 'P2' | 'P4' | 'P6';
 
 export interface DoorInfo {
@@ -398,6 +401,551 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
   }
 ];
 
+export interface WalkwayNode {
+  id: string;
+  x: number;
+  y: number;
+  label?: string;
+}
+
+export interface WalkwayEdge {
+  id: string;
+  from: string;
+  to: string;
+  bidirectional?: boolean;
+}
+
+export interface WalkwayNetwork {
+  nodes: WalkwayNode[];
+  edges: WalkwayEdge[];
+}
+
+export interface CampusMapConfig {
+  doors: Record<DoorId, DoorInfo>;
+  pavilions: Pavilion[];
+  walkways: WalkwayNetwork;
+  updated_at?: string;
+}
+
+export const DEFAULT_WALKWAY_NETWORK: WalkwayNetwork = {
+  "nodes": [
+    {
+      "id": "p4_door",
+      "x": 201,
+      "y": 389,
+      "label": "Puerta 4"
+    },
+    {
+      "id": "p2_door",
+      "x": 390,
+      "y": 384,
+      "label": "Puerta 2"
+    },
+    {
+      "id": "p6_door",
+      "x": 39,
+      "y": 173,
+      "label": "Puerta 6"
+    },
+    {
+      "id": "p1_door",
+      "x": 539,
+      "y": 294,
+      "label": "Puerta 1"
+    },
+    {
+      "id": "c_p4",
+      "x": 201,
+      "y": 365,
+      "label": "Calzada Sur P4"
+    },
+    {
+      "id": "c_s1",
+      "x": 242,
+      "y": 365,
+      "label": "Calzada Sur Farmacia"
+    },
+    {
+      "id": "c_s2",
+      "x": 280,
+      "y": 365,
+      "label": "Calzada Sur Contabilidad"
+    },
+    {
+      "id": "c_p2",
+      "x": 380,
+      "y": 365,
+      "label": "Calzada Sur P2"
+    },
+    {
+      "id": "c_s3",
+      "x": 505,
+      "y": 365,
+      "label": "Calzada Sur Este"
+    },
+    {
+      "id": "w_s",
+      "x": 75,
+      "y": 365,
+      "label": "Corredor Oeste Sur"
+    },
+    {
+      "id": "w_mid",
+      "x": 75,
+      "y": 248,
+      "label": "Corredor Oeste Sociales"
+    },
+    {
+      "id": "w_p6",
+      "x": 75,
+      "y": 173,
+      "label": "Corredor Oeste P6"
+    },
+    {
+      "id": "w_n",
+      "x": 75,
+      "y": 75,
+      "label": "Corredor Oeste Norte"
+    },
+    {
+      "id": "cv_farm",
+      "x": 201,
+      "y": 345,
+      "label": "Eje Oeste Farmacia"
+    },
+    {
+      "id": "cv_soc",
+      "x": 201,
+      "y": 248,
+      "label": "Eje Oeste Sociales"
+    },
+    {
+      "id": "cv_mid",
+      "x": 201,
+      "y": 215,
+      "label": "Eje Oeste Central"
+    },
+    {
+      "id": "cv_quim",
+      "x": 201,
+      "y": 188,
+      "label": "Eje Oeste Quimica"
+    },
+    {
+      "id": "cv_arq",
+      "x": 201,
+      "y": 145,
+      "label": "Eje Oeste Arquitectura"
+    },
+    {
+      "id": "cv_n",
+      "x": 201,
+      "y": 75,
+      "label": "Eje Oeste Norte"
+    },
+    {
+      "id": "plz_biol",
+      "x": 240,
+      "y": 215,
+      "label": "Plaza Biologia"
+    },
+    {
+      "id": "plz_cen",
+      "x": 300,
+      "y": 215,
+      "label": "Plaza Central"
+    },
+    {
+      "id": "bv_mid",
+      "x": 380,
+      "y": 215,
+      "label": "Bulevar Central"
+    },
+    {
+      "id": "bv_inf",
+      "x": 380,
+      "y": 335,
+      "label": "Bulevar Informatica"
+    },
+    {
+      "id": "bv_enf",
+      "x": 380,
+      "y": 297,
+      "label": "Bulevar Enfermeria"
+    },
+    {
+      "id": "bv_minas",
+      "x": 380,
+      "y": 257,
+      "label": "Bulevar Minas"
+    },
+    {
+      "id": "bv_elec",
+      "x": 380,
+      "y": 183,
+      "label": "Bulevar Electrica"
+    },
+    {
+      "id": "bv_electr",
+      "x": 380,
+      "y": 158,
+      "label": "Bulevar Electronica"
+    },
+    {
+      "id": "bv_cepru",
+      "x": 380,
+      "y": 121,
+      "label": "Bulevar Cepru"
+    },
+    {
+      "id": "bv_n",
+      "x": 380,
+      "y": 75,
+      "label": "Bulevar Norte"
+    },
+    {
+      "id": "e_p1",
+      "x": 505,
+      "y": 294,
+      "label": "Eje Este P1"
+    },
+    {
+      "id": "e_mid",
+      "x": 505,
+      "y": 200,
+      "label": "Eje Este Medio"
+    },
+    {
+      "id": "e_comun",
+      "x": 505,
+      "y": 114,
+      "label": "Eje Este Comunicacion"
+    },
+    {
+      "id": "e_n",
+      "x": 505,
+      "y": 75,
+      "label": "Eje Este Norte"
+    },
+    {
+      "id": "n_civil",
+      "x": 275,
+      "y": 75,
+      "label": "Eje Norte Civil"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_dp4",
+      "from": "p4_door",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_dp2",
+      "from": "p2_door",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_dp6",
+      "from": "p6_door",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_dp1",
+      "from": "p1_door",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_cs0",
+      "from": "w_s",
+      "to": "c_p4"
+    },
+    {
+      "id": "e_cs1",
+      "from": "c_p4",
+      "to": "c_s1"
+    },
+    {
+      "id": "e_cs2",
+      "from": "c_s1",
+      "to": "c_s2"
+    },
+    {
+      "id": "e_cs3",
+      "from": "c_s2",
+      "to": "c_p2"
+    },
+    {
+      "id": "e_cs4",
+      "from": "c_p2",
+      "to": "c_s3"
+    },
+    {
+      "id": "e_cs5",
+      "from": "c_s3",
+      "to": "e_p1"
+    },
+    {
+      "id": "e_w1",
+      "from": "w_s",
+      "to": "w_mid"
+    },
+    {
+      "id": "e_w2",
+      "from": "w_mid",
+      "to": "w_p6"
+    },
+    {
+      "id": "e_w3",
+      "from": "w_p6",
+      "to": "w_n"
+    },
+    {
+      "id": "e_w4",
+      "from": "w_n",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_w5",
+      "from": "w_p6",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_w6",
+      "from": "w_mid",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv0",
+      "from": "c_p4",
+      "to": "cv_farm"
+    },
+    {
+      "id": "e_cv1",
+      "from": "cv_farm",
+      "to": "cv_soc"
+    },
+    {
+      "id": "e_cv2",
+      "from": "cv_soc",
+      "to": "cv_mid"
+    },
+    {
+      "id": "e_cv3",
+      "from": "cv_mid",
+      "to": "cv_quim"
+    },
+    {
+      "id": "e_cv4",
+      "from": "cv_quim",
+      "to": "cv_arq"
+    },
+    {
+      "id": "e_cv5",
+      "from": "cv_arq",
+      "to": "cv_n"
+    },
+    {
+      "id": "e_plz1",
+      "from": "cv_mid",
+      "to": "plz_biol"
+    },
+    {
+      "id": "e_plz2",
+      "from": "plz_biol",
+      "to": "plz_cen"
+    },
+    {
+      "id": "e_plz3",
+      "from": "plz_cen",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv0",
+      "from": "c_p2",
+      "to": "bv_inf"
+    },
+    {
+      "id": "e_bv1",
+      "from": "bv_inf",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_bv2",
+      "from": "bv_enf",
+      "to": "bv_minas"
+    },
+    {
+      "id": "e_bv3",
+      "from": "bv_minas",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_bv4",
+      "from": "bv_mid",
+      "to": "bv_elec"
+    },
+    {
+      "id": "e_bv5",
+      "from": "bv_elec",
+      "to": "bv_electr"
+    },
+    {
+      "id": "e_bv6",
+      "from": "bv_electr",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_bv7",
+      "from": "bv_cepru",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_e1",
+      "from": "e_p1",
+      "to": "e_mid"
+    },
+    {
+      "id": "e_e2",
+      "from": "e_mid",
+      "to": "e_comun"
+    },
+    {
+      "id": "e_e3",
+      "from": "e_comun",
+      "to": "e_n"
+    },
+    {
+      "id": "e_e4",
+      "from": "e_p1",
+      "to": "bv_enf"
+    },
+    {
+      "id": "e_e5",
+      "from": "e_mid",
+      "to": "bv_mid"
+    },
+    {
+      "id": "e_e6",
+      "from": "e_comun",
+      "to": "bv_cepru"
+    },
+    {
+      "id": "e_n1",
+      "from": "cv_n",
+      "to": "n_civil"
+    },
+    {
+      "id": "e_n2",
+      "from": "n_civil",
+      "to": "bv_n"
+    },
+    {
+      "id": "e_n3",
+      "from": "bv_n",
+      "to": "e_n"
+    }
+  ]
+};
+
+// Configuración viva en memoria sincronizada con Supabase Cloud y safeStorage
+let liveCampusMapConfig: CampusMapConfig = {
+  doors: OFFICIAL_DOORS,
+  pavilions: CAMPUS_PAVILIONS,
+  walkways: DEFAULT_WALKWAY_NETWORK,
+};
+
+// Carga inicial síncrona desde caché local persistente
+try {
+  const cached = safeStorage.getItem('unsaac_campus_map_config');
+  if (cached) {
+    const parsed = JSON.parse(cached);
+    if (parsed.doors && parsed.pavilions) {
+      liveCampusMapConfig = {
+        doors: parsed.doors,
+        pavilions: parsed.pavilions,
+        walkways: parsed.walkways || DEFAULT_WALKWAY_NETWORK,
+        updated_at: parsed.updated_at
+      };
+    }
+  }
+} catch (e) {
+  // ignore
+}
+
+export function loadLiveCampusMap(): CampusMapConfig {
+  return liveCampusMapConfig;
+}
+
+export function updateLiveCampusMap(newConfig: Partial<CampusMapConfig>) {
+  liveCampusMapConfig = {
+    ...liveCampusMapConfig,
+    ...newConfig,
+    walkways: newConfig.walkways || liveCampusMapConfig.walkways || DEFAULT_WALKWAY_NETWORK
+  };
+  try {
+    safeStorage.setItem('unsaac_campus_map_config', JSON.stringify(liveCampusMapConfig));
+  } catch (e) {}
+}
+
+/**
+ * Sincroniza en tiempo real la configuración del croquis desde Supabase Cloud o Backend Local.
+ * Se ejecuta automáticamente sin congelar la interfaz ni bloquear impresiones.
+ */
+export async function syncCampusMapFromCloud(): Promise<boolean> {
+  // 1. Intentar Backend Local (http://localhost:5000/api/campus-map)
+  try {
+    const res = await fetch('http://localhost:5000/api/campus-map', { signal: AbortSignal.timeout(2000) });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.doors && data.pavilions) {
+        updateLiveCampusMap({
+          doors: data.doors,
+          pavilions: data.pavilions,
+          walkways: data.walkways || DEFAULT_WALKWAY_NETWORK,
+          updated_at: data.updated_at || data.last_modified
+        });
+        return true;
+      }
+    }
+  } catch (e) {
+    // Backend local no disponible
+  }
+
+  // 2. Intentar Supabase Cloud directamente
+  try {
+    const { data, error } = await supabase
+      .from('templates')
+      .select('content, last_modified')
+      .eq('name', 'campus_map_config')
+      .maybeSingle();
+
+    if (!error && data && data.content) {
+      const parsed = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+      if (parsed.doors && parsed.pavilions) {
+        updateLiveCampusMap({
+          doors: parsed.doors,
+          pavilions: parsed.pavilions,
+          walkways: parsed.walkways || DEFAULT_WALKWAY_NETWORK,
+          updated_at: parsed.updated_at || data.last_modified
+        });
+        return true;
+      }
+    }
+  } catch (err) {
+    console.warn('[CampusMap] No se pudo sincronizar mapa desde la nube:', err);
+  }
+
+  return false;
+}
+
+// Disparo silencioso de sincronización inicial en background
+if (typeof window !== 'undefined') {
+  setTimeout(() => {
+    syncCampusMapFromCloud().catch(() => {});
+  }, 1000);
+}
+
 /**
  * Identifica el pabellón a partir de los datos disponibles del postulante
  */
@@ -407,6 +955,10 @@ export function resolvePavilion(postulante: {
   pabellon?: string;
   nombre_pabellon?: string;
 }): Pavilion {
+  const allPavs = (liveCampusMapConfig.pavilions && liveCampusMapConfig.pavilions.length > 0)
+    ? liveCampusMapConfig.pavilions
+    : CAMPUS_PAVILIONS;
+
   const normalize = (s?: string) =>
     (s || '')
       .toLowerCase()
@@ -420,7 +972,7 @@ export function resolvePavilion(postulante: {
 
   // 1. Prioridad: Coincidencia por nombre de pabellón explícito
   if (searchPabellon) {
-    for (const p of CAMPUS_PAVILIONS) {
+    for (const p of allPavs) {
       if (p.keywords.some(kw => searchPabellon.includes(kw))) {
         return p;
       }
@@ -429,7 +981,7 @@ export function resolvePavilion(postulante: {
 
   // 2. Coincidencia por código o texto en el campo Aula (ej: "ARQ-101", "PAB-C-15", "DER-202")
   if (searchAula) {
-    for (const p of CAMPUS_PAVILIONS) {
+    for (const p of allPavs) {
       if (p.keywords.some(kw => searchAula.includes(kw))) {
         return p;
       }
@@ -438,7 +990,7 @@ export function resolvePavilion(postulante: {
 
   // 3. Coincidencia por Escuela Profesional / Carrera del postulante
   if (searchCarrera) {
-    for (const p of CAMPUS_PAVILIONS) {
+    for (const p of allPavs) {
       if (p.keywords.some(kw => searchCarrera.includes(kw))) {
         return p;
       }
@@ -446,7 +998,7 @@ export function resolvePavilion(postulante: {
   }
 
   // Fallback: Pabellón C (pabellón genérico central de aulas)
-  return CAMPUS_PAVILIONS.find(p => p.code === 'PAB_C') || CAMPUS_PAVILIONS[0];
+  return allPavs.find(p => p.code === 'PAB_C') || allPavs[0];
 }
 
 /**
@@ -459,158 +1011,157 @@ export function isSedeCusco(sede?: string): boolean {
 }
 
 /**
- * Calcula los puntos de la ruta peatonal principal a través de los corredores oficiales
- * garantizando cero colisiones con pabellones existentes.
+ * Calcula la ruta más corta sobre la red de vías peatonales usando el algoritmo de Dijkstra.
+ * Garantiza que la ruta siga estrictamente las vías habilitadas, sin atravesar ningún edificio.
  */
-export function calculateRoutePoints(door: DoorInfo, target: Pavilion): [number, number][] {
-  const points: [number, number][] = [[door.x, door.y]];
+export function findShortestWalkwayPath(
+  startPt: [number, number],
+  endPt: [number, number],
+  network: WalkwayNetwork = DEFAULT_WALKWAY_NETWORK
+): [number, number][] {
+  const nodes = [...(network.nodes || [])];
+  const edges = [...(network.edges || [])];
 
-  if (door.id === 'P4') {
-    // Puerta 4 (x=201, y=389): Eje vertebral peatonal 201
-    if (target.code === 'ARQ' || target.code === 'CIVIL') {
-      points.push([201, 145]);
-      points.push([target.entryX, 145]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'PAB_C') {
-      points.push([201, 215]);
-      points.push([target.entryX, 215]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'EDUC') {
-      points.push([201, 215]);
-      points.push([300, 215]);
-      points.push([300, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'ECON' || target.code === 'CONTAB' || target.code === 'FARM' || target.code === 'QUIM' || target.code === 'SOC') {
-      points.push([201, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else {
-      // Sector Este: sube al eje 215, cruza al bulevar 380 y avanza al destino
-      points.push([201, 215]);
-      points.push([380, 215]);
-      points.push([380, target.entryY]);
-      points.push([target.entryX, target.entryY]);
+  if (nodes.length === 0) {
+    return [startPt, endPt];
+  }
+
+  // Función para encontrar el nodo más cercano a un punto dado
+  function findNearest(pt: [number, number]): WalkwayNode | null {
+    let nearest: WalkwayNode | null = null;
+    let minDist = Infinity;
+    for (const n of nodes) {
+      const d = Math.hypot(n.x - pt[0], n.y - pt[1]);
+      if (d < minDist) {
+        minDist = d;
+        nearest = n;
+      }
     }
-  } else if (door.id === 'P2') {
-    // Puerta 2 (x=390, y=384): Conecta al bulevar peatonal 380
-    points.push([380, 360]);
-    if (['INF', 'ENF', 'MINAS', 'MEC', 'ELEC', 'PAB_5284', 'DER', 'CEPRU', 'COMUN'].includes(target.code)) {
-      points.push([380, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'CONTAB') {
-      points.push([380, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'EDUC') {
-      points.push([380, 215]);
-      points.push([300, 215]);
-      points.push([300, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'ECON') {
-      points.push([380, 215]);
-      points.push([target.entryX, 215]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'FARM') {
-      points.push([380, 360]);
-      points.push([201, 360]);
-      points.push([201, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'CIVIL' || target.code === 'ARQ') {
-      points.push([380, 215]);
-      points.push([201, 215]);
-      points.push([201, 145]);
-      points.push([target.entryX, 145]);
-      points.push([target.entryX, target.entryY]);
-    } else {
-      // PAB_C, QUIM, SOC
-      points.push([380, 215]);
-      points.push([201, 215]);
-      points.push([201, target.entryY]);
-      points.push([target.entryX, target.entryY]);
+    return nearest;
+  }
+
+  const startNearest = findNearest(startPt);
+  const endNearest = findNearest(endPt);
+
+  if (!startNearest || !endNearest) {
+    return [startPt, endPt];
+  }
+
+  // Crear nodos y aristas virtuales para conectar origen y destino a la red
+  const startId = '__temp_start';
+  const endId = '__temp_end';
+  nodes.push({ id: startId, x: startPt[0], y: startPt[1] });
+  nodes.push({ id: endId, x: endPt[0], y: endPt[1] });
+
+  edges.push({ id: '__temp_e_start', from: startId, to: startNearest.id });
+  edges.push({ id: '__temp_e_end', from: endNearest.id, to: endId });
+
+  // Construir mapa de adyacencia
+  const nodeMap = new Map<string, WalkwayNode>(nodes.map(n => [n.id, n]));
+  const adj = new Map<string, Array<{ to: string; dist: number }>>();
+  for (const n of nodes) adj.set(n.id, []);
+
+  for (const e of edges) {
+    const fn = nodeMap.get(e.from);
+    const tn = nodeMap.get(e.to);
+    if (!fn || !tn) continue;
+    const d = Math.hypot(fn.x - tn.x, fn.y - tn.y);
+    adj.get(e.from)?.push({ to: e.to, dist: d });
+    if (e.bidirectional !== false) {
+      adj.get(e.to)?.push({ to: e.from, dist: d });
     }
-  } else if (door.id === 'P6') {
-    // Puerta 6 (x=39, y=173): Corredor Oeste 75
-    points.push([75, door.y]);
-    if (target.code === 'ARQ' || target.code === 'CIVIL') {
-      points.push([75, 145]);
-      points.push([target.entryX, 145]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'QUIM' || target.code === 'SOC') {
-      points.push([75, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'FARM' || target.code === 'CONTAB') {
-      points.push([75, 290]);
-      points.push([201, 290]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'ECON') {
-      points.push([75, 215]);
-      points.push([target.entryX, 215]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'EDUC') {
-      points.push([75, 215]);
-      points.push([300, 215]);
-      points.push([300, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (target.code === 'PAB_C') {
-      points.push([75, 215]);
-      points.push([target.entryX, 215]);
-      points.push([target.entryX, target.entryY]);
-    } else {
-      // Sector Este
-      points.push([75, 215]);
-      points.push([380, 215]);
-      points.push([380, target.entryY]);
-      points.push([target.entryX, target.entryY]);
+  }
+
+  // Dijkstra
+  const dists = new Map<string, number>();
+  const prev = new Map<string, string>();
+  const unvisited = new Set<string>(nodes.map(n => n.id));
+  for (const n of nodes) dists.set(n.id, Infinity);
+  dists.set(startId, 0);
+
+  while (unvisited.size > 0) {
+    let curr: string | null = null;
+    let minDist = Infinity;
+    for (const id of unvisited) {
+      const d = dists.get(id)!;
+      if (d < minDist) {
+        minDist = d;
+        curr = id;
+      }
     }
-  } else if (door.id === 'P1') {
-    // Puerta 1 (x=539, y=294): Corredor Este 505
-    points.push([505, door.y]);
-    if (target.code === 'COMUN') {
-      points.push([505, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else if (['ELEC', 'MEC', 'MINAS', 'INF', 'ENF', 'PAB_5284'].includes(target.code)) {
-      points.push([505, 280]);
-      points.push([380, 280]);
-      points.push([380, target.entryY]);
-      points.push([target.entryX, target.entryY]);
-    } else {
-      points.push([505, 280]);
-      points.push([380, 280]);
-      if (['DER', 'CEPRU'].includes(target.code)) {
-        points.push([380, target.entryY]);
-        points.push([target.entryX, target.entryY]);
-      } else if (target.code === 'EDUC') {
-        points.push([380, 215]);
-        points.push([300, 215]);
-        points.push([300, target.entryY]);
-        points.push([target.entryX, target.entryY]);
-      } else if (target.code === 'ECON') {
-        points.push([380, 215]);
-        points.push([target.entryX, 215]);
-        points.push([target.entryX, target.entryY]);
-      } else if (target.code === 'CIVIL' || target.code === 'ARQ') {
-        points.push([380, 215]);
-        points.push([201, 215]);
-        points.push([201, 145]);
-        points.push([target.entryX, 145]);
-        points.push([target.entryX, target.entryY]);
-      } else {
-        points.push([380, 215]);
-        points.push([201, 215]);
-        points.push([201, target.entryY]);
-        points.push([target.entryX, target.entryY]);
+    if (curr === null || minDist === Infinity) break;
+    if (curr === endId) break;
+    unvisited.delete(curr);
+
+    for (const edge of adj.get(curr) || []) {
+      if (!unvisited.has(edge.to)) continue;
+      const alt = dists.get(curr)! + edge.dist;
+      if (alt < dists.get(edge.to)!) {
+        dists.set(edge.to, alt);
+        prev.set(edge.to, curr);
       }
     }
   }
 
-  // Eliminar puntos redundantes o duplicados seguidos
-  const cleanPoints: [number, number][] = [];
-  for (let i = 0; i < points.length; i++) {
-    const cur = points[i];
-    const prev = cleanPoints[cleanPoints.length - 1];
-    if (!prev || Math.abs(cur[0] - prev[0]) > 0.5 || Math.abs(cur[1] - prev[1]) > 0.5) {
-      cleanPoints.push(cur);
+  const rawPath: [number, number][] = [];
+  let u: string | undefined = endId;
+  while (u) {
+    const n = nodeMap.get(u);
+    if (n) rawPath.unshift([n.x, n.y]);
+    u = prev.get(u);
+  }
+
+  if (rawPath.length < 2) {
+    return [startPt, endPt];
+  }
+
+  // 1. Limpieza de puntos duplicados continuos (< 0.8px)
+  const clean: [number, number][] = [rawPath[0]];
+  for (let i = 1; i < rawPath.length; i++) {
+    const cur = rawPath[i];
+    const prevPt = clean[clean.length - 1];
+    if (Math.hypot(cur[0] - prevPt[0], cur[1] - prevPt[1]) > 0.8) {
+      clean.push(cur);
     }
   }
-  return cleanPoints;
+
+  // 2. Reducción de puntos colineales (rectas limpias para impresión térmica nítida)
+  const finalPath: [number, number][] = [clean[0]];
+  for (let i = 1; i < clean.length - 1; i++) {
+    const pPrev = finalPath[finalPath.length - 1];
+    const pCurr = clean[i];
+    const pNext = clean[i + 1];
+
+    const dx1 = pCurr[0] - pPrev[0];
+    const dy1 = pCurr[1] - pPrev[1];
+    const dx2 = pNext[0] - pCurr[0];
+    const dy2 = pNext[1] - pCurr[1];
+
+    const cross = dx1 * dy2 - dy1 * dx2;
+    const dot = dx1 * dx2 + dy1 * dy2;
+
+    if (Math.abs(cross) < 1e-4 && dot > 0) {
+      continue; // Colineal en la misma dirección, simplificar punto intermedio
+    }
+    finalPath.push(pCurr);
+  }
+  finalPath.push(clean[clean.length - 1]);
+
+  return finalPath;
+}
+
+/**
+ * Calcula los puntos de la ruta peatonal a través de la red de vías calibrada
+ * garantizando cero colisiones con pabellones.
+ */
+export function calculateRoutePoints(
+  door: DoorInfo, 
+  target: Pavilion,
+  customWalkways?: WalkwayNetwork
+): [number, number][] {
+  const currentConfig = loadLiveCampusMap();
+  const network = customWalkways || currentConfig.walkways || DEFAULT_WALKWAY_NETWORK;
+  return findShortestWalkwayPath([door.x, door.y], [target.entryX, target.entryY], network);
 }
 
 export interface SmartViewport {
@@ -710,15 +1261,17 @@ export function generateRouteInstructions(doorId: DoorId, target: Pavilion): str
  * Genera el código SVG del croquis con Smart Zoom
  * Optimizado para impresión térmica 80mm de alta legibilidad, sin saturación visual.
  */
-export function generateCampusRouteSvg(doorId: DoorId, target: Pavilion): string {
-  const door = OFFICIAL_DOORS[doorId] || OFFICIAL_DOORS.P2;
-  const pathPoints = calculateRoutePoints(door, target);
+export function generateCampusRouteSvg(doorId: DoorId, target: Pavilion, customConfig?: CampusMapConfig): string {
+  const config = customConfig || loadLiveCampusMap();
+  const door = (config.doors && config.doors[doorId]) || OFFICIAL_DOORS[doorId] || OFFICIAL_DOORS.P2;
+  const pathPoints = calculateRoutePoints(door, target, config.walkways);
   const vp = computeSmartViewport(door, target, pathPoints);
 
   const polylineStr = pathPoints.map(p => `${Math.round(p[0])},${Math.round(p[1])}`).join(' ');
 
   // Filtrado inteligente: Solo renderizar pabellones dentro del viewport visible (evitando recortes mínimos en bordes)
-  const visiblePavilions = CAMPUS_PAVILIONS.filter(p => {
+  const allPavilions = (config.pavilions && config.pavilions.length > 0) ? config.pavilions : CAMPUS_PAVILIONS;
+  const visiblePavilions = allPavilions.filter(p => {
     if (p.code === target.code) return true;
     const overlapX = Math.max(0, Math.min(p.x + p.w, vp.vx + vp.vw) - Math.max(p.x, vp.vx));
     const overlapY = Math.max(0, Math.min(p.y + p.h, vp.vy + vp.vh) - Math.max(p.y, vp.vy));

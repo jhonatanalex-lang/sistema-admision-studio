@@ -15,6 +15,8 @@ import {
   isSedeCusco,
   generateCampusRouteSvg,
   generateRouteInstructions,
+  loadLiveCampusMap,
+  syncCampusMapFromCloud,
 } from './campusMapSvg';
 
 export type { DoorId, DoorInfo, Pavilion };
@@ -24,6 +26,8 @@ export {
   isSedeCusco,
   generateCampusRouteSvg,
   generateRouteInstructions,
+  loadLiveCampusMap,
+  syncCampusMapFromCloud,
 };
 
 export interface TicketPostulanteData {
@@ -93,8 +97,9 @@ export function generateTicketHtml(
   const isCusco = isSedeCusco(postulante.sede);
 
   // Normalizar Puerta de Ingreso
+  const liveMap = loadLiveCampusMap();
   const doorKey = normalizeDoorId(selectedDoor || postulante.puerta_ingreso);
-  const doorInfo = OFFICIAL_DOORS[doorKey] || OFFICIAL_DOORS.P2;
+  const doorInfo = (liveMap.doors && liveMap.doors[doorKey]) || OFFICIAL_DOORS[doorKey] || OFFICIAL_DOORS.P2;
 
   // En Cusco calculamos el pabellón de destino y croquis de ruta
   let targetPavilion: Pavilion | null = null;
