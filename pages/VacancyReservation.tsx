@@ -1909,19 +1909,25 @@ export const VacancyReservation: React.FC<VacancyReservationProps> = ({ user, no
                                                           <span className="text-[9px] font-medium text-slate-400">{parsed.originalDate}</span>
                                                       )}
                                                       {parsed.isModified && (
-                                                          <div className="mt-1 p-2 bg-amber-50 border border-amber-200 rounded-xl flex flex-col gap-0.5">
-                                                              <div className="flex items-center justify-between gap-1">
-                                                                  <span className="text-[8px] font-black text-amber-800 uppercase tracking-tighter flex items-center gap-0.5">
-                                                                      <span className="material-symbols-outlined text-[12px]">history_edu</span> Modificado por 2da Res.:
-                                                                  </span>
-                                                                  {parsed.modPdf && (
-                                                                      <a href={parsed.modPdf} target="_blank" rel="noopener noreferrer" className="text-amber-800 hover:text-amber-950 font-black text-[8px] uppercase underline flex items-center gap-0.5">
-                                                                          <span className="material-symbols-outlined text-[11px]">picture_as_pdf</span> PDF
-                                                                      </a>
-                                                                  )}
-                                                              </div>
-                                                              <span className="text-[9px] font-black text-amber-900 uppercase">{parsed.modNumber}</span>
-                                                              {parsed.modDate && <span className="text-[8px] text-amber-700">{parsed.modDate}</span>}
+                                                          <div className="flex items-center gap-1.5 flex-wrap mt-0.5 text-[9px]">
+                                                              <span className="inline-flex items-center gap-1 font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                                                  <span className="material-symbols-outlined text-[12px] text-amber-600">edit_note</span>
+                                                                  Modif: <strong className="text-slate-800 font-bold uppercase">{parsed.modNumber}</strong>
+                                                              </span>
+                                                              {parsed.modPdf && (
+                                                                  <a 
+                                                                      href={parsed.modPdf} 
+                                                                      target="_blank" 
+                                                                      rel="noopener noreferrer" 
+                                                                      className="size-5 rounded bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 flex items-center justify-center transition-colors border border-slate-200" 
+                                                                      title="Ver PDF Resolución Modificatoria"
+                                                                  >
+                                                                      <span className="material-symbols-outlined text-[12px]">picture_as_pdf</span>
+                                                                  </a>
+                                                              )}
+                                                              {parsed.modDate && (
+                                                                  <span className="text-[9px] text-slate-400 font-medium">({parsed.modDate})</span>
+                                                              )}
                                                           </div>
                                                       )}
                                                   </div>
