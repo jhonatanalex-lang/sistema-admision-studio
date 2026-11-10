@@ -157,6 +157,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const isConstancia = selectedTemplate ? (selectedTemplate.category === 'Certificados' || selectedTemplate.name.toLowerCase().includes('constancia')) : false;
+  const [constanciaMode, setConstanciaMode] = useState<'digital' | 'fisico'>('digital');
   
   // Manual Data & Preview States
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
@@ -1623,6 +1624,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       setSelectedTemplate(null);
       setManualValues({});
       setDetectedVariables([]);
+      setConstanciaMode('digital');
       setMatchingAdmissions([]);
       setSelectedAdmissionIds([]);
       setIsLoadingAdmissions(false);
@@ -2124,6 +2126,19 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       // 3. Garantizar justificación profesional y elegante del cuerpo del documento
       content = content.replace(/text-align\s*:\s*justify/gi, 'text-align: justify; text-justify: inter-word;');
 
+      // 4. Modalidad FÍSICO para Constancias: remover firmas digitales y ajustar texto de expedición
+      if (isConstancia && constanciaMode === 'fisico') {
+          // Ajustar texto: remover "virtual"
+          content = content.replace(/a\s+petici[oó\u00f3\ufffd]n\s+virtual\s+de\s+la\s+parte\s+interesada/gi, 'a petición de la parte interesada');
+
+          // Remover imágenes de firmas digitales (dejando líneas y nombres intactos para firma manuscrita y sello)
+          content = content.replace(/<img[^>]+src=["'][^"']*(?:firma_|firma)[^"']*["'][^>]*>/gi, '');
+          content = content.replace(/<img[^>]+style=["'][^"']*mix-blend-mode:\s*multiply[^"']*["'][^>]*>/gi, (match) => {
+              if (match.includes('watermark') || match.includes('unsaac-qr')) return match;
+              return '';
+          });
+      }
+
       return content;
   };
 
@@ -2377,7 +2392,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                   userName: user?.name,
                   userInitials: initials,
                   userId: user?.id,
-                  pdfUrl: urlData.publicUrl
+                  pdfUrl: urlData.publicUrl,
+                  emissionMode: constanciaMode === 'fisico' ? 'FISICO' : 'DIGITAL'
               }).catch(e => console.warn('Error al registrar emisión oficial:', e));
           } else {
               // Registro de INFORME Oficial o trámite recurrente generado (Rectificación, Renuncia, etc.)
@@ -2581,8 +2597,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                   }
               }
           
-          // 5. Trigger Download (Automatic only if it's not a constancia, e.g. it's an Informe or general document)
-          if (!isConstancia && !signedPdf) {
+          // 5. Trigger Download (Automatic if physical constancia, or if it's an Informe/general doc)
+          if ((!isConstancia || constanciaMode === 'fisico') && !signedPdf) {
               const url = window.URL.createObjectURL(finalPdfBlob);
               const a = document.createElement('a');
               a.href = url;
@@ -2592,8 +2608,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
               a.remove();
           }
           
-          // 6. Send Email if provided and is Constancia
-          if (studentEmail && isConstancia) {
+          // 6. Send Email if provided and is Virtual Constancia
+          if (studentEmail && isConstancia && constanciaMode === 'digital') {
               const reader = new FileReader();
               reader.readAsDataURL(finalPdfBlob);
               reader.onloadend = async () => {
@@ -2631,10 +2647,17 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                   }
               }
           } else {
-              if (notify) notify("Documento generado, guardado y trámite finalizado.");
+              if (notify) {
+                  notify(
+                      isConstancia && constanciaMode === 'fisico'
+                          ? "Constancia física generada, guardada y descargada para impresión."
+                          : "Documento generado, guardado y trámite finalizado."
+                  );
+              }
           }
 
           setIsAttendModalOpen(false);
+          setConstanciaMode('digital');
           setMatchingAdmissions([]);
           setSelectedAdmissionIds([]);
           setIsLoadingAdmissions(false);
@@ -3708,6 +3731,56 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                             <p className="text-xs text-slate-500">Complete las variables del documento y verifique los ingresos del estudiante.</p>
                                         </div>
 
+                                        {/* Interruptor de Modalidad de Emisión (Solo Constancias) */}
+                                        {isConstancia && (
+                                            <div className="flex flex-col gap-2 p-3 rounded-2xl border border-slate-200/90 bg-slate-50/70 shadow-xs">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                                                        <span className="material-symbols-outlined text-sm text-primary">tune</span>
+                                                        Modalidad de Emisión
+                                                    </span>
+                                                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                                        constanciaMode === 'digital' 
+                                                            ? 'bg-primary/10 text-primary border border-primary/20' 
+                                                            : 'bg-slate-800 text-white'
+                                                    }`}>
+                                                        {constanciaMode === 'digital' ? 'Con Firmas Digitales' : 'Para Firma Manuscrita'}
+                                                    </span>
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConstanciaMode('digital')}
+                                                        className={`h-10 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                            constanciaMode === 'digital'
+                                                                ? 'bg-primary text-white shadow-md active:scale-95'
+                                                                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                                                        }`}
+                                                    >
+                                                        <span className="material-symbols-outlined text-base">mark_email_read</span>
+                                                        <span>VIRTUAL</span>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setConstanciaMode('fisico')}
+                                                        className={`h-10 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                            constanciaMode === 'fisico'
+                                                                ? 'bg-slate-900 text-white shadow-md active:scale-95'
+                                                                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+                                                        }`}
+                                                    >
+                                                        <span className="material-symbols-outlined text-base">print</span>
+                                                        <span>EN FÍSICO</span>
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 leading-tight">
+                                                    {constanciaMode === 'digital'
+                                                        ? 'Se estamparán firmas digitales oficiales y se enviará al correo del estudiante.'
+                                                        : 'Se omitirán las firmas de la plantilla para su suscripción y sellado físico.'}
+                                                </p>
+                                            </div>
+                                        )}
+
                                         <div className="flex flex-col gap-4">
                                             {detectedVariables.length === 0 ? (
                                                 <div className="p-4 bg-green-50 text-green-700 rounded-xl text-xs font-bold flex items-center gap-2">
@@ -3918,9 +3991,9 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                 </div>
                                             )}
 
-                                            {/* Opcional: Correo del Estudiante (Solo Constancias) */}
-                                            {isConstancia && (
-                                                <div className="flex flex-col gap-4 mt-4 border-t border-slate-100 pt-4">
+                                            {/* Correo del Estudiante (Solo Constancias Virtuales) */}
+                                            {isConstancia && constanciaMode === 'digital' && (
+                                                <div className="flex flex-col gap-4 mt-4 border-t border-slate-100 pt-4 animate-in fade-in-50 duration-200">
                                                     <label className="flex flex-col gap-1.5">
                                                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Correo del Estudiante</span>
                                                         <input 
@@ -3940,18 +4013,24 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                         <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-3">
                                             <button 
                                                 onClick={finalizeAndDownload} 
-                                                disabled={isSubmitting || (isConstancia && !studentEmail.trim())}
-                                                className="w-full h-14 bg-primary text-white rounded-2xl text-xs font-black uppercase shadow-xl shadow-primary/30 active:scale-95 transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+                                                disabled={isSubmitting || (isConstancia && constanciaMode === 'digital' && !studentEmail.trim())}
+                                                className={`w-full h-14 ${
+                                                    isConstancia && constanciaMode === 'fisico' 
+                                                        ? 'bg-slate-900 hover:bg-slate-800 shadow-slate-900/30' 
+                                                        : 'bg-primary shadow-primary/30'
+                                                } text-white rounded-2xl text-xs font-black uppercase shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 mt-2 disabled:opacity-50`}
                                             >
                                                 {isSubmitting ? (
                                                     <span className="material-symbols-outlined animate-spin">progress_activity</span>
                                                 ) : (
-                                                    <span className="material-symbols-outlined">{isConstancia ? 'mail' : 'download'}</span>
+                                                    <span className="material-symbols-outlined">
+                                                        {isConstancia ? (constanciaMode === 'digital' ? 'mail' : 'print') : 'download'}
+                                                    </span>
                                                 )}
                                                 {isSubmitting 
                                                     ? 'PROCESANDO...' 
                                                     : isConstancia 
-                                                        ? 'FINALIZAR Y ENVIAR AL CORREO' 
+                                                        ? (constanciaMode === 'digital' ? 'FINALIZAR Y ENVIAR AL CORREO' : 'FINALIZAR Y DESCARGAR CONSTANCIA FÍSICA')
                                                         : 'FINALIZAR Y DESCARGAR INFORME'
                                                 }
                                             </button>

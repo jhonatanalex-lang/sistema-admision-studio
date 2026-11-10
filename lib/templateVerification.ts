@@ -23,6 +23,7 @@ export interface DocumentVerificationData {
   isAttachedOnly?: boolean;
   attachedPdfUrl?: string;
   warningNote?: string;
+  emissionMode?: 'DIGITAL' | 'FISICO';
 }
 
 export interface EmissionRegistrationPayload {
@@ -43,6 +44,7 @@ export interface EmissionRegistrationPayload {
   userInitials?: string;
   userId?: string;
   pdfUrl?: string;
+  emissionMode?: 'DIGITAL' | 'FISICO';
 }
 
 // Catálogo oficial de operadores de la Dirección de Admisión UNSAAC
@@ -241,6 +243,7 @@ export async function registerDocumentEmission(
 
     const destinationMeta = {
       tipo_documento: payload.documentType || 'CONSTANCIA DE INGRESO',
+      modalidad_emision: payload.emissionMode || 'DIGITAL',
       estudiante_nombre: payload.studentName || '',
       estudiante_dni: payload.studentDni || '',
       estudiante_codigo: payload.studentCode || '',
@@ -482,7 +485,8 @@ export async function fetchDocumentVerification(
           issuedAt: meta?.fecha_emision || bestRecord.created_at || new Date().toISOString(),
           isValid: true,
           isAttachedOnly: false,
-          attachedPdfUrl: bestRecord.pdf_url || undefined
+          attachedPdfUrl: bestRecord.pdf_url || undefined,
+          emissionMode: (meta?.modalidad_emision as 'DIGITAL' | 'FISICO') || (meta?.firmas_origen === 'MANUAL_HOLOGRAFA' ? 'FISICO' : 'DIGITAL')
         };
       } else {
         // Documento en expedientes de salida pero sin generación oficial

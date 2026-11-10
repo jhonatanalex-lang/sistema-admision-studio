@@ -29,8 +29,8 @@ export const OFFICIAL_DOORS: Record<DoorId, DoorInfo> = {
     "label": "PUERTA N° 1",
     "avenue": "Av. Haya de la Torre",
     "reference": "Altura del pabellón de Medicina Humana",
-    "x": 539,
-    "y": 294,
+    "x": 542,
+    "y": 284,
     "badgeX": 520,
     "badgeY": 200
   },
@@ -40,8 +40,8 @@ export const OFFICIAL_DOORS: Record<DoorId, DoorInfo> = {
     "label": "PUERTA N° 2",
     "avenue": "Av. La Cultura",
     "reference": "Altura del pabellón de Enfermería",
-    "x": 390,
-    "y": 384,
+    "x": 384,
+    "y": 389,
     "badgeX": 390,
     "badgeY": 366
   },
@@ -62,8 +62,8 @@ export const OFFICIAL_DOORS: Record<DoorId, DoorInfo> = {
     "label": "PUERTA N° 6",
     "avenue": "Av. Universitaria",
     "reference": "Costado de Urb. Mariscal Gamarra",
-    "x": 39,
-    "y": 173,
+    "x": 41,
+    "y": 169,
     "badgeX": 58,
     "badgeY": 140
   }
@@ -281,8 +281,8 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
     "num": 16,
     "name": "Pabellón C (Aulas Generales)",
     "short": "BIOLOGIA",
-    "x": 237,
-    "y": 173,
+    "x": 209,
+    "y": 183,
     "w": 55,
     "h": 34,
     "entryX": 236,
@@ -420,430 +420,97 @@ export interface WalkwayNetwork {
   edges: WalkwayEdge[];
 }
 
+export type CustomRoutesMap = Record<string, [number, number][]>;
+
 export interface CampusMapConfig {
   doors: Record<DoorId, DoorInfo>;
   pavilions: Pavilion[];
-  walkways: WalkwayNetwork;
+  walkways?: WalkwayNetwork;
+  routes?: CustomRoutesMap;
   updated_at?: string;
 }
 
 export const DEFAULT_WALKWAY_NETWORK: WalkwayNetwork = {
   "nodes": [
     {
-      "id": "p4_door",
-      "x": 201,
-      "y": 389,
-      "label": "Puerta 4"
+      "id": "entry_DER",
+      "x": 343,
+      "y": 161,
+      "label": "Acceso DERECHO"
     },
     {
-      "id": "p2_door",
-      "x": 390,
-      "y": 384,
-      "label": "Puerta 2"
+      "id": "p_3703",
+      "x": 389,
+      "y": 171,
+      "label": "P2"
     },
     {
-      "id": "p6_door",
-      "x": 39,
-      "y": 173,
-      "label": "Puerta 6"
+      "id": "p_4360",
+      "x": 391,
+      "y": 236,
+      "label": "P3"
     },
     {
-      "id": "p1_door",
-      "x": 539,
-      "y": 294,
-      "label": "Puerta 1"
+      "id": "p_4967",
+      "x": 388,
+      "y": 261,
+      "label": "P4"
     },
     {
-      "id": "c_p4",
-      "x": 201,
-      "y": 365,
-      "label": "Calzada Sur P4"
+      "id": "p_5567",
+      "x": 381,
+      "y": 277,
+      "label": "P5"
     },
     {
-      "id": "c_s1",
-      "x": 242,
-      "y": 365,
-      "label": "Calzada Sur Farmacia"
-    },
-    {
-      "id": "c_s2",
-      "x": 280,
-      "y": 365,
-      "label": "Calzada Sur Contabilidad"
-    },
-    {
-      "id": "c_p2",
+      "id": "p_6392",
       "x": 380,
-      "y": 365,
-      "label": "Calzada Sur P2"
+      "y": 288,
+      "label": "P6"
     },
     {
-      "id": "c_s3",
-      "x": 505,
-      "y": 365,
-      "label": "Calzada Sur Este"
-    },
-    {
-      "id": "w_s",
-      "x": 75,
-      "y": 365,
-      "label": "Corredor Oeste Sur"
-    },
-    {
-      "id": "w_mid",
-      "x": 75,
-      "y": 248,
-      "label": "Corredor Oeste Sociales"
-    },
-    {
-      "id": "w_p6",
-      "x": 75,
-      "y": 173,
-      "label": "Corredor Oeste P6"
-    },
-    {
-      "id": "w_n",
-      "x": 75,
-      "y": 75,
-      "label": "Corredor Oeste Norte"
-    },
-    {
-      "id": "cv_farm",
-      "x": 201,
-      "y": 345,
-      "label": "Eje Oeste Farmacia"
-    },
-    {
-      "id": "cv_soc",
-      "x": 201,
-      "y": 248,
-      "label": "Eje Oeste Sociales"
-    },
-    {
-      "id": "cv_mid",
-      "x": 201,
-      "y": 215,
-      "label": "Eje Oeste Central"
-    },
-    {
-      "id": "cv_quim",
-      "x": 201,
-      "y": 188,
-      "label": "Eje Oeste Quimica"
-    },
-    {
-      "id": "cv_arq",
-      "x": 201,
-      "y": 145,
-      "label": "Eje Oeste Arquitectura"
-    },
-    {
-      "id": "cv_n",
-      "x": 201,
-      "y": 75,
-      "label": "Eje Oeste Norte"
-    },
-    {
-      "id": "plz_biol",
-      "x": 240,
-      "y": 215,
-      "label": "Plaza Biologia"
-    },
-    {
-      "id": "plz_cen",
-      "x": 300,
-      "y": 215,
-      "label": "Plaza Central"
-    },
-    {
-      "id": "bv_mid",
-      "x": 380,
-      "y": 215,
-      "label": "Bulevar Central"
-    },
-    {
-      "id": "bv_inf",
-      "x": 380,
-      "y": 335,
-      "label": "Bulevar Informatica"
-    },
-    {
-      "id": "bv_enf",
-      "x": 380,
-      "y": 297,
-      "label": "Bulevar Enfermeria"
-    },
-    {
-      "id": "bv_minas",
-      "x": 380,
-      "y": 257,
-      "label": "Bulevar Minas"
-    },
-    {
-      "id": "bv_elec",
-      "x": 380,
-      "y": 183,
-      "label": "Bulevar Electrica"
-    },
-    {
-      "id": "bv_electr",
-      "x": 380,
-      "y": 158,
-      "label": "Bulevar Electronica"
-    },
-    {
-      "id": "bv_cepru",
-      "x": 380,
-      "y": 121,
-      "label": "Bulevar Cepru"
-    },
-    {
-      "id": "bv_n",
-      "x": 380,
-      "y": 75,
-      "label": "Bulevar Norte"
-    },
-    {
-      "id": "e_p1",
-      "x": 505,
-      "y": 294,
-      "label": "Eje Este P1"
-    },
-    {
-      "id": "e_mid",
-      "x": 505,
-      "y": 200,
-      "label": "Eje Este Medio"
-    },
-    {
-      "id": "e_comun",
-      "x": 505,
-      "y": 114,
-      "label": "Eje Este Comunicacion"
-    },
-    {
-      "id": "e_n",
-      "x": 505,
-      "y": 75,
-      "label": "Eje Este Norte"
-    },
-    {
-      "id": "n_civil",
-      "x": 275,
-      "y": 75,
-      "label": "Eje Norte Civil"
+      "id": "p_0839",
+      "x": 434,
+      "y": 285,
+      "label": "P7"
     }
   ],
   "edges": [
     {
-      "id": "e_dp4",
-      "from": "p4_door",
-      "to": "c_p4"
+      "id": "e_entry_DER_p_3703",
+      "from": "entry_DER",
+      "to": "p_3703",
+      "bidirectional": true
     },
     {
-      "id": "e_dp2",
-      "from": "p2_door",
-      "to": "c_p2"
+      "id": "e_p_3703_p_4360",
+      "from": "p_3703",
+      "to": "p_4360",
+      "bidirectional": true
     },
     {
-      "id": "e_dp6",
-      "from": "p6_door",
-      "to": "w_p6"
+      "id": "e_p_4360_p_4967",
+      "from": "p_4360",
+      "to": "p_4967",
+      "bidirectional": true
     },
     {
-      "id": "e_dp1",
-      "from": "p1_door",
-      "to": "e_p1"
+      "id": "e_p_4967_p_5567",
+      "from": "p_4967",
+      "to": "p_5567",
+      "bidirectional": true
     },
     {
-      "id": "e_cs0",
-      "from": "w_s",
-      "to": "c_p4"
+      "id": "e_p_5567_p_6392",
+      "from": "p_5567",
+      "to": "p_6392",
+      "bidirectional": true
     },
     {
-      "id": "e_cs1",
-      "from": "c_p4",
-      "to": "c_s1"
-    },
-    {
-      "id": "e_cs2",
-      "from": "c_s1",
-      "to": "c_s2"
-    },
-    {
-      "id": "e_cs3",
-      "from": "c_s2",
-      "to": "c_p2"
-    },
-    {
-      "id": "e_cs4",
-      "from": "c_p2",
-      "to": "c_s3"
-    },
-    {
-      "id": "e_cs5",
-      "from": "c_s3",
-      "to": "e_p1"
-    },
-    {
-      "id": "e_w1",
-      "from": "w_s",
-      "to": "w_mid"
-    },
-    {
-      "id": "e_w2",
-      "from": "w_mid",
-      "to": "w_p6"
-    },
-    {
-      "id": "e_w3",
-      "from": "w_p6",
-      "to": "w_n"
-    },
-    {
-      "id": "e_w4",
-      "from": "w_n",
-      "to": "cv_n"
-    },
-    {
-      "id": "e_w5",
-      "from": "w_p6",
-      "to": "cv_quim"
-    },
-    {
-      "id": "e_w6",
-      "from": "w_mid",
-      "to": "cv_soc"
-    },
-    {
-      "id": "e_cv0",
-      "from": "c_p4",
-      "to": "cv_farm"
-    },
-    {
-      "id": "e_cv1",
-      "from": "cv_farm",
-      "to": "cv_soc"
-    },
-    {
-      "id": "e_cv2",
-      "from": "cv_soc",
-      "to": "cv_mid"
-    },
-    {
-      "id": "e_cv3",
-      "from": "cv_mid",
-      "to": "cv_quim"
-    },
-    {
-      "id": "e_cv4",
-      "from": "cv_quim",
-      "to": "cv_arq"
-    },
-    {
-      "id": "e_cv5",
-      "from": "cv_arq",
-      "to": "cv_n"
-    },
-    {
-      "id": "e_plz1",
-      "from": "cv_mid",
-      "to": "plz_biol"
-    },
-    {
-      "id": "e_plz2",
-      "from": "plz_biol",
-      "to": "plz_cen"
-    },
-    {
-      "id": "e_plz3",
-      "from": "plz_cen",
-      "to": "bv_mid"
-    },
-    {
-      "id": "e_bv0",
-      "from": "c_p2",
-      "to": "bv_inf"
-    },
-    {
-      "id": "e_bv1",
-      "from": "bv_inf",
-      "to": "bv_enf"
-    },
-    {
-      "id": "e_bv2",
-      "from": "bv_enf",
-      "to": "bv_minas"
-    },
-    {
-      "id": "e_bv3",
-      "from": "bv_minas",
-      "to": "bv_mid"
-    },
-    {
-      "id": "e_bv4",
-      "from": "bv_mid",
-      "to": "bv_elec"
-    },
-    {
-      "id": "e_bv5",
-      "from": "bv_elec",
-      "to": "bv_electr"
-    },
-    {
-      "id": "e_bv6",
-      "from": "bv_electr",
-      "to": "bv_cepru"
-    },
-    {
-      "id": "e_bv7",
-      "from": "bv_cepru",
-      "to": "bv_n"
-    },
-    {
-      "id": "e_e1",
-      "from": "e_p1",
-      "to": "e_mid"
-    },
-    {
-      "id": "e_e2",
-      "from": "e_mid",
-      "to": "e_comun"
-    },
-    {
-      "id": "e_e3",
-      "from": "e_comun",
-      "to": "e_n"
-    },
-    {
-      "id": "e_e4",
-      "from": "e_p1",
-      "to": "bv_enf"
-    },
-    {
-      "id": "e_e5",
-      "from": "e_mid",
-      "to": "bv_mid"
-    },
-    {
-      "id": "e_e6",
-      "from": "e_comun",
-      "to": "bv_cepru"
-    },
-    {
-      "id": "e_n1",
-      "from": "cv_n",
-      "to": "n_civil"
-    },
-    {
-      "id": "e_n2",
-      "from": "n_civil",
-      "to": "bv_n"
-    },
-    {
-      "id": "e_n3",
-      "from": "bv_n",
-      "to": "e_n"
+      "id": "e_p_6392_p_0839",
+      "from": "p_6392",
+      "to": "p_0839",
+      "bidirectional": true
     }
   ]
 };
@@ -853,6 +520,7 @@ let liveCampusMapConfig: CampusMapConfig = {
   doors: OFFICIAL_DOORS,
   pavilions: CAMPUS_PAVILIONS,
   walkways: DEFAULT_WALKWAY_NETWORK,
+  routes: {},
 };
 
 // Carga inicial síncrona desde caché local persistente
@@ -865,6 +533,7 @@ try {
         doors: parsed.doors,
         pavilions: parsed.pavilions,
         walkways: parsed.walkways || DEFAULT_WALKWAY_NETWORK,
+        routes: parsed.routes || {},
         updated_at: parsed.updated_at
       };
     }
@@ -881,7 +550,8 @@ export function updateLiveCampusMap(newConfig: Partial<CampusMapConfig>) {
   liveCampusMapConfig = {
     ...liveCampusMapConfig,
     ...newConfig,
-    walkways: newConfig.walkways || liveCampusMapConfig.walkways || DEFAULT_WALKWAY_NETWORK
+    walkways: newConfig.walkways || liveCampusMapConfig.walkways || DEFAULT_WALKWAY_NETWORK,
+    routes: newConfig.routes !== undefined ? newConfig.routes : (liveCampusMapConfig.routes || {})
   };
   try {
     safeStorage.setItem('unsaac_campus_map_config', JSON.stringify(liveCampusMapConfig));
@@ -903,6 +573,7 @@ export async function syncCampusMapFromCloud(): Promise<boolean> {
           doors: data.doors,
           pavilions: data.pavilions,
           walkways: data.walkways || DEFAULT_WALKWAY_NETWORK,
+          routes: data.routes || {},
           updated_at: data.updated_at || data.last_modified
         });
         return true;
@@ -927,6 +598,7 @@ export async function syncCampusMapFromCloud(): Promise<boolean> {
           doors: parsed.doors,
           pavilions: parsed.pavilions,
           walkways: parsed.walkways || DEFAULT_WALKWAY_NETWORK,
+          routes: parsed.routes || {},
           updated_at: parsed.updated_at || data.last_modified
         });
         return true;
@@ -1151,15 +823,28 @@ export function findShortestWalkwayPath(
 }
 
 /**
- * Calcula los puntos de la ruta peatonal a través de la red de vías calibrada
+ * Calcula los puntos de la ruta peatonal:
+ * 1. Prioridad: Ruta calibrada punto por punto para la combinación Puerta-Pabellón (Opción 1)
+ * 2. Fallback: Red de vías peatonales calculada con Dijkstra
  * garantizando cero colisiones con pabellones.
  */
 export function calculateRoutePoints(
   door: DoorInfo, 
   target: Pavilion,
-  customWalkways?: WalkwayNetwork
+  customWalkways?: WalkwayNetwork,
+  customRoutes?: CustomRoutesMap
 ): [number, number][] {
   const currentConfig = loadLiveCampusMap();
+  const routes = customRoutes || currentConfig.routes || {};
+  const routeKey = `${door.id}_${target.code}`;
+
+  // Prioridad 1: Si existe ruta personalizada calibrada con esquinas
+  if (routes[routeKey] && Array.isArray(routes[routeKey])) {
+    const waypoints = routes[routeKey];
+    return [[door.x, door.y], ...waypoints, [target.entryX, target.entryY]];
+  }
+
+  // Prioridad 2: Cálculo dinámico de camino más corto en la red peatonal
   const network = customWalkways || currentConfig.walkways || DEFAULT_WALKWAY_NETWORK;
   return findShortestWalkwayPath([door.x, door.y], [target.entryX, target.entryY], network);
 }
@@ -1264,7 +949,7 @@ export function generateRouteInstructions(doorId: DoorId, target: Pavilion): str
 export function generateCampusRouteSvg(doorId: DoorId, target: Pavilion, customConfig?: CampusMapConfig): string {
   const config = customConfig || loadLiveCampusMap();
   const door = (config.doors && config.doors[doorId]) || OFFICIAL_DOORS[doorId] || OFFICIAL_DOORS.P2;
-  const pathPoints = calculateRoutePoints(door, target, config.walkways);
+  const pathPoints = calculateRoutePoints(door, target, config.walkways, config.routes);
   const vp = computeSmartViewport(door, target, pathPoints);
 
   const polylineStr = pathPoints.map(p => `${Math.round(p[0])},${Math.round(p[1])}`).join(' ');

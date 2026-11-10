@@ -22,6 +22,24 @@ async function startServer() {
   // --- AUTH ROUTES ---
   app.use("/api/auth", authRoutes);
 
+  // --- LOCAL PROXY FOR CAMPUS MAP (EDITOR CROQUIS) ---
+  app.use("/api/campus-map", async (req, res) => {
+    try {
+      const fetchReq = await import('node-fetch').then(m => m.default);
+      const targetUrl = "http://127.0.0.1:5000/api/campus-map";
+      const response = await fetchReq(targetUrl, {
+        method: req.method,
+        headers: { "Content-Type": "application/json" },
+        body: ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body)
+      });
+      const data = await response.json();
+      res.status(response.status).json(data);
+    } catch (err: any) {
+      console.error("[Proxy campus-map] Error:", err.message);
+      res.status(502).json({ error: "Backend local no disponible", details: err.message });
+    }
+  });
+
   // --- LOCAL PROXY FOR FILES (DEV ONLY) ---
   app.use("/api/files", async (req, res) => {
     try {
@@ -1626,7 +1644,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: "spa",
     });
     app.use(vite.middlewares);

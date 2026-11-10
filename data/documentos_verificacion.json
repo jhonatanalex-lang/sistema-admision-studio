@@ -63,5 +63,28 @@
     "issuedAt": "2026-10-26T14:15:49.715Z",
     "dbId": "2282fd19-1521-4794-aec9-283a05a845c0",
     "savedAt": "2026-10-26T14:15:50.214Z"
+  },
+  "UNSAAC-CONST-2026-8I0C14": {
+    "verificationCode": "UNSAAC-CONST-2026-8I0C14",
+    "documentType": "CONSTANCIA DE INGRESO",
+    "studentName": "CHOQUE-GARCIA-FRANCIS JUNIOR",
+    "studentDni": "600418",
+    "studentCode": "600418",
+    "career": "BIOLOGIA",
+    "modality": "EXAMEN ORDINARIO 2012-II",
+    "semester": "2012-II",
+    "score": "10.5",
+    "meritOrder": "16",
+    "admissionDate": "12/08/2012",
+    "expNumber": "9999999999999",
+    "receiptNumber": "f-0000045645645",
+    "userName": "CHOQUE-CARITAS-JHONATAN ALEX",
+    "userInitials": "JCH",
+    "userId": "2cddaa12-25a3-4806-8eec-148298c28c43",
+    "pdfUrl": "https://skspesnjdpypjyjuskht.supabase.co/storage/v1/object/public/documentos/salidas/1794314358134_9999999999999_CHOQUE_GARCIA_FRANCIS_JUNIOR.pdf",
+    "emissionMode": "FISICO",
+    "issuedAt": "2026-11-10T12:39:19.445Z",
+    "dbId": "44a165d3-aae6-456b-b6c5-ca27e3fc7510",
+    "savedAt": "2026-11-10T12:39:20.120Z"
   }
 }

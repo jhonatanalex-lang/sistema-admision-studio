@@ -325,10 +325,17 @@ export const PublicDocumentVerification: React.FC = () => {
                 <span className="font-mono text-sm sm:text-base font-bold text-[#7b1523] tracking-wide block mt-0.5 select-all">
                   {data.verificationCode}
                 </span>
-                <span className="text-[11px] text-emerald-700 font-semibold flex items-center sm:justify-end gap-1 mt-0.5">
-                  <span className="size-1.5 rounded-full bg-emerald-600"></span>
-                  Firma Electrónica Válida
-                </span>
+                {data.emissionMode === 'FISICO' ? (
+                  <span className="text-[11px] text-amber-800 font-semibold flex items-center sm:justify-end gap-1 mt-0.5">
+                    <span className="size-1.5 rounded-full bg-amber-600"></span>
+                    Constancia Oficial Física (Firma Manuscrita)
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-emerald-700 font-semibold flex items-center sm:justify-end gap-1 mt-0.5">
+                    <span className="size-1.5 rounded-full bg-emerald-600"></span>
+                    Firma Electrónica Válida
+                  </span>
+                )}
               </div>
             </div>
 
@@ -442,6 +449,13 @@ export const PublicDocumentVerification: React.FC = () => {
                   <span className="text-slate-500 block">Entidad Emisora:</span>
                   <span className="font-semibold text-slate-800 block mt-0.5">
                     Dirección de Admisión · UNSAAC
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-slate-500 block">Modalidad de Emisión:</span>
+                  <span className={`font-semibold block mt-0.5 ${data.emissionMode === 'FISICO' ? 'text-amber-800' : 'text-emerald-700'}`}>
+                    {data.emissionMode === 'FISICO' ? 'Física (Impresión y Firma Manuscrita)' : 'Digital (Firma Electrónica)'}
                   </span>
                 </div>
 
