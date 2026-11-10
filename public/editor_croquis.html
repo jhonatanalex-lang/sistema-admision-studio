@@ -739,7 +739,7 @@
           Funciona desde cualquier PC, laptop o celular sin importar a qué red estén conectados.
         </p>
         <div style="display: flex; gap: 6px;">
-          <input type="text" id="share-url-public" class="field-input" readonly value="https://applied-dishes-taylor-replace.trycloudflare.com/editor_croquis.html" style="font-family: monospace; font-size: 11px; background: #1e293b; color: #38bdf8;">
+          <input type="text" id="share-url-public" class="field-input" readonly value="https://zone-certainly-allowed-establishment.trycloudflare.com/editor_croquis.html" style="font-family: monospace; font-size: 11px; background: #1e293b; color: #38bdf8;">
           <button class="btn btn-primary" onclick="copyShareUrl('share-url-public')" style="white-space: nowrap;">📋 Copiar</button>
         </div>
       </div>
@@ -1248,6 +1248,18 @@ const DEFAULT_WALKWAY_NETWORK = {
     // Toast
     
     function openShareModal() {
+      const pubInput = document.getElementById('share-url-public');
+      if (pubInput) {
+        if (window.location.hostname.includes('trycloudflare.com')) {
+          pubInput.value = window.location.href.split('?')[0];
+        } else {
+          pubInput.value = 'https://zone-certainly-allowed-establishment.trycloudflare.com/editor_croquis.html';
+        }
+      }
+      const lanInput = document.getElementById('share-url-lan');
+      if (lanInput) {
+        lanInput.value = 'http://10.10.16.214:3000/editor_croquis.html';
+      }
       const modal = document.getElementById('share-modal');
       if (modal) modal.style.display = 'flex';
     }

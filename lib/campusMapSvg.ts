@@ -191,8 +191,8 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
     "num": 35,
     "name": "Ingeniería Civil",
     "short": "ING. CIVIL",
-    "x": 242,
-    "y": 95,
+    "x": 241,
+    "y": 92,
     "w": 74,
     "h": 25,
     "entryX": 275,
@@ -397,6 +397,22 @@ export const CAMPUS_PAVILIONS: Pavilion[] = [
     "keywords": [
       "nuevo",
       "pab_5284"
+    ]
+  },
+  {
+    "code": "PAB_6006",
+    "num": 19,
+    "name": "TURISMO",
+    "short": "TURISMO",
+    "x": 209,
+    "y": 252,
+    "w": 69,
+    "h": 31,
+    "entryX": 206,
+    "entryY": 283,
+    "keywords": [
+      "nuevo",
+      "pab_6006"
     ]
   }
 ];
