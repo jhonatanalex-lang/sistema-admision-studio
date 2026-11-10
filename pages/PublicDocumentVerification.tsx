@@ -261,25 +261,35 @@ export const PublicDocumentVerification: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                {data.attachedPdfUrl && (
-                  <a
-                    href={data.attachedPdfUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 text-xs font-semibold bg-white/20 hover:bg-white/30 text-white rounded transition-colors flex items-center gap-1 shadow-xs print:hidden"
-                    title="Ver o descargar archivo PDF original del documento emitido"
+                {data.emissionMode === 'FISICO' ? (
+                  <div
+                    className="px-3 py-1.5 text-xs font-semibold bg-amber-500/25 text-amber-100 border border-amber-300/40 rounded flex items-center gap-1.5 shadow-xs print:hidden select-none"
+                    title="Documento expedido en soporte físico para firma manuscrita y sellos institucionales"
                   >
-                    <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
-                    Ver PDF Original
-                  </a>
+                    <span className="material-symbols-outlined text-[16px] text-amber-300">edit_document</span>
+                    <span>Emisión en Formato Físico</span>
+                  </div>
+                ) : (
+                  data.attachedPdfUrl && (
+                    <a
+                      href={data.attachedPdfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 text-xs font-semibold bg-white/20 hover:bg-white/30 text-white rounded transition-colors flex items-center gap-1 shadow-xs print:hidden"
+                      title="Ver o descargar archivo PDF original del documento emitido"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+                      Ver PDF Original
+                    </a>
+                  )
                 )}
                 <button
                   onClick={handlePrintCertificate}
                   className="px-3 py-1.5 text-xs font-semibold bg-white text-emerald-800 rounded hover:bg-emerald-50 transition-colors flex items-center gap-1 shadow-xs print:hidden"
-                  title="Imprimir comprobante de validación"
+                  title="Imprimir o guardar ficha oficial de autenticidad institucional"
                 >
                   <span className="material-symbols-outlined text-[16px]">print</span>
-                  Imprimir Ficha
+                  Imprimir Ficha de Autenticidad
                 </button>
               </div>
             </div>
@@ -338,6 +348,29 @@ export const PublicDocumentVerification: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {/* Aviso Institucional para Constancia Emitida en Modalidad Física */}
+            {data.emissionMode === 'FISICO' && (
+              <div className="mx-6 my-5 p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-950 flex items-start gap-3.5 shadow-xs print:border-amber-300 print:bg-white">
+                <div className="size-9 rounded-lg bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0 text-amber-800">
+                  <span className="material-symbols-outlined text-[22px]">history_edu</span>
+                </div>
+                <div className="flex-1 text-xs leading-relaxed">
+                  <h4 className="font-bold text-amber-900 text-sm flex items-center gap-1.5 mb-1">
+                    Constancia Oficial Emitida en Modalidad Física (Suscripción Manuscrita)
+                  </h4>
+                  <p className="text-amber-800">
+                    Este documento oficial fue expedido para <strong>suscripción y timbrado manual en ventanilla</strong>. Su plena validez jurídica ante terceros (instituciones académicas, colegios profesionales, empleadores o entidades públicas) se acredita mediante la presentación del <strong>ejemplar físico original en papel institucional</strong>, suscrito con firmas manuscritas a tinta y sellos de las autoridades de la Dirección de Admisión.
+                  </p>
+                  <p className="text-amber-900 font-semibold mt-2 pt-2 border-t border-amber-200/70 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px] text-emerald-700">verified</span>
+                    <span>
+                      La autenticidad e integridad de los datos impresos (titular, carrera, puntaje, proceso y puesto de mérito) queda <strong>fehacientemente acreditada y certificada</strong> por los registros oficiales de este portal.
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Datos del Estudiante / Ingresante */}
             <div className="p-6">
