@@ -817,22 +817,72 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       }
   };
 
-  // == Autocomplete logic ==
+  // == Autocomplete logic flexible para Nombres o DNI ==
   const searchDirectorioAutocomplete = async (term: string) => {
-      setNewSorteo(prev => ({...prev, nombres: term}));
-      if (term.length < 3) {
+      setNewSorteo(prev => ({ ...prev, nombres: term }));
+      const cleanTerm = term.trim();
+      if (cleanTerm.length < 2) {
           setDirSearchResults([]);
           setShowDirSearch(false);
           return;
       }
-      const { data } = await supabase.from('personal_directorio')
-          .select('*')
-          .ilike('nombre', `%${term}%`)
-          .limit(6);
+
+      try {
+          let query = supabase.from('personal_directorio').select('*');
           
-      if (data) {
-          setDirSearchResults(data);
-          setShowDirSearch(data.length > 0);
+          if (/^\d+$/.test(cleanTerm)) {
+              // Búsqueda numérica directa por DNI o código de trabajador
+              query = query.or(`dni.ilike.%${cleanTerm}%,cod_trab.ilike.%${cleanTerm}%`);
+          } else {
+              // Búsqueda por palabras (permite buscar en cualquier orden sin importar guiones ni mayúsculas)
+              const words = cleanTerm.split(/\s+/).filter(w => w.length >= 2);
+              if (words.length > 1) {
+                  for (const w of words) {
+                      query = query.ilike('nombre', `%${w}%`);
+                  }
+              } else if (words.length === 1) {
+                  query = query.or(`nombre.ilike.%${words[0]}%,dni.ilike.%${words[0]}%`);
+              }
+          }
+
+          const { data } = await query.limit(25);
+          if (data) {
+              setDirSearchResults(data);
+              setShowDirSearch(data.length > 0);
+          }
+      } catch (err) {
+          console.error('Error buscando en directorio:', err);
+      }
+  };
+
+  const handleDniInputChange = async (dniVal: string) => {
+      setNewSorteo(prev => ({ ...prev, dni: dniVal }));
+      const cleanDni = dniVal.trim();
+      
+      if (cleanDni.length >= 3) {
+          try {
+              const { data } = await supabase.from('personal_directorio')
+                  .select('*')
+                  .ilike('dni', `%${cleanDni}%`)
+                  .limit(15);
+              
+              if (data && data.length > 0) {
+                  // Si hay coincidencia exacta de 8 dígitos, autocompletar datos de inmediato
+                  if (cleanDni.length === 8 && data.some(p => p.dni === cleanDni)) {
+                      const exact = data.find(p => p.dni === cleanDni);
+                      if (exact) {
+                          handleSelectPersonForSorteo(exact);
+                          return;
+                      }
+                  }
+                  setDirSearchResults(data);
+                  setShowDirSearch(true);
+              }
+          } catch (err) {
+              console.error('Error autocompletando DNI:', err);
+          }
+      } else {
+          setShowDirSearch(false);
       }
   };
 
@@ -1962,22 +2012,49 @@ UNSAAC`);
                              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4 overflow-visible relative border-t-4 border-t-slate-800 shrink-0">
                              <h4 className="font-bold text-slate-900 text-sm">Añadir Persona al Sorteo</h4>
                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                 <input type="text" placeholder="DNI" value={newSorteo.dni} onChange={e=>setNewSorteo({...newSorteo, dni: e.target.value})} className="border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none font-mono" />
+                                 <div className="relative">
+                                     <input 
+                                         type="text" 
+                                         placeholder="DNI (8 dígitos para autocompletar)" 
+                                         value={newSorteo.dni} 
+                                         onChange={e => handleDniInputChange(e.target.value)} 
+                                         className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none font-mono font-bold" 
+                                     />
+                                 </div>
                                  
                                  <div className="relative">
-                                     <input type="text" placeholder="NOMBRES COMPLETOS (Escribe para buscar)" value={newSorteo.nombres} onChange={e=>searchDirectorioAutocomplete(e.target.value)} onFocus={() => { if(dirSearchResults.length > 0) setShowDirSearch(true); }} className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none uppercase font-bold" />
+                                     <input 
+                                         type="text" 
+                                         placeholder="NOMBRES O DNI (Escribe para buscar)" 
+                                         value={newSorteo.nombres} 
+                                         onChange={e => searchDirectorioAutocomplete(e.target.value)} 
+                                         onFocus={() => { if (dirSearchResults.length > 0) setShowDirSearch(true); }} 
+                                         className="w-full border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none uppercase font-bold" 
+                                     />
                                      {showDirSearch && (
-                                         <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden max-h-48 overflow-y-auto">
+                                         <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden max-h-64 overflow-y-auto">
+                                            <div className="p-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 flex justify-between items-center">
+                                                <span>COINCIDENCIAS EN DIRECTORIO ({dirSearchResults.length})</span>
+                                                <button onClick={() => setShowDirSearch(false)} className="text-slate-400 hover:text-slate-700">✕</button>
+                                            </div>
                                             {dirSearchResults.map(p => (
-                                                <button key={p.id} onClick={() => handleSelectPersonForSorteo(p)} className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-0">
+                                                <button 
+                                                    key={p.id} 
+                                                    onClick={() => handleSelectPersonForSorteo(p)} 
+                                                    className="w-full text-left px-3.5 py-2.5 hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors flex flex-col gap-0.5"
+                                                >
                                                     <div className="text-xs font-bold text-slate-800">{p.nombre}</div>
-                                                    <div className="text-[10px] text-slate-500 font-mono">{p.dni} - {p.departamento_cargo || 'Sin Area'}</div>
+                                                    <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                                        <span className="font-mono font-bold bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 border border-slate-200">{p.dni}</span>
+                                                        <span>{p.departamento_cargo || p.condicion || 'Sin Área'}</span>
+                                                        {p.telefono && <span className="text-slate-400">· Cel: {p.telefono}</span>}
+                                                    </div>
                                                 </button>
                                             ))}
-                                            <button onClick={() => setShowDirSearch(false)} className="w-full text-center text-[10px] font-bold text-slate-400 p-2 bg-slate-50 hover:text-slate-600">Cerrar</button>
-    </div>
+                                            <button onClick={() => setShowDirSearch(false)} className="w-full text-center text-[10px] font-bold text-slate-400 p-2 bg-slate-50 hover:text-slate-600">Cerrar sugerencias</button>
+                                         </div>
                                      )}
-    </div>
+                                 </div>
                                  
                                  <select value={newSorteo.cargo} onChange={e=>setNewSorteo({...newSorteo, cargo: e.target.value})} className="border border-slate-200 rounded-lg p-2.5 text-xs focus:ring-1 focus:ring-primary outline-none uppercase font-bold text-slate-700">
                                        <option value="">-- SELECCIONAR CARGO --</option>
