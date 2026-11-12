@@ -1,7 +1,7 @@
 {
   "name": "unsaac-admin-console",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.55",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

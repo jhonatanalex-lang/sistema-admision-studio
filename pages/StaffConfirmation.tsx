@@ -89,6 +89,30 @@ export const StaffConfirmation = () => {
             .eq('id', id);
 
         if (error) throw error;
+
+        // Notificación en Tiempo Real instantánea (Websocket Broadcast a todos los operadores activos)
+        try {
+            const realtimeChannel = supabase.channel('sorteos-live-tracking');
+            realtimeChannel.subscribe(async (subStatus) => {
+                if (subStatus === 'SUBSCRIBED') {
+                    await realtimeChannel.send({
+                        type: 'broadcast',
+                        event: 'sorteo-status-changed',
+                        payload: {
+                            sorteoId: id,
+                            estado: state,
+                            procesoId: sorteo?.proceso_id,
+                            nombres: sorteo?.nombres,
+                            cargo: sorteo?.cargo,
+                            motivo: state === 'Rechazado' ? motivo : undefined
+                        }
+                    });
+                    setTimeout(() => supabase.removeChannel(realtimeChannel), 1200);
+                }
+            });
+        } catch (rtErr) {
+            console.warn('Realtime broadcast warning:', rtErr);
+        }
         
         const auditDesc = state === 'Confirmado'
              ? `${sorteo?.nombres} confirmó su participación mediante el enlace web para el cargo de ${sorteo?.cargo}`

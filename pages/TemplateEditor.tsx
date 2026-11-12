@@ -207,6 +207,9 @@ export const TemplateEditor: React.FC<Props> = ({ user }) => {
     // Variables Específicas de Informes
     { code: '{{INFORME}}', desc: 'N° de Informe (Ej: 054-2024)' },
     { code: '{{EXP}}', desc: 'N° de Expediente' },
+    { code: '{{AUTORIDAD_NOMBRE}}', desc: 'Nombre y Título de Autoridad Destinataria (Actas de Sesiones)' },
+    { code: '{{AUTORIDAD_CARGO}}', desc: 'Cargo Institucional de la Autoridad Destinataria' },
+    { code: '{{ASUNTO}}', desc: 'Asunto Oficial del Documento / Informe' },
     { code: '{{MOTIVO}}', desc: 'Motivo de Rectificación' },
     { code: '{{NOMBRECORRE}}', desc: 'Nombre Correcto (Para Tabla)' },
     { code: '{{BOUCHER}}', desc: 'N° Recibo de Pago' },
@@ -462,8 +465,12 @@ export const TemplateEditor: React.FC<Props> = ({ user }) => {
               contentToSet = contentToSet
                   .replace(/{{nombres}}/g, studentData.NOMBRE || '')
                   .replace(/{{apellidos}}/g, '') // NOMBRE usually contains full name
+                  .replace(/{{CODPOSTULANTE}}/g, studentData.CODPOSTULANTE || '')
+                  .replace(/{{codpostulante}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{dni}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{codigo}}/g, studentData.CODPOSTULANTE || '')
+                  .replace(/{{codigo_estudi}}/g, studentData.CODPOSTULANTE || '')
+                  .replace(/{{codigo_estudiante}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{escuela}}/g, studentData.CARRERA || '')
                   .replace(/{{modalidad}}/g, studentData.MODALIDAD || '')
                   .replace(/{{nota}}/g, studentData.NOTA || '')

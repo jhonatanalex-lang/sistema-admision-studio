@@ -196,18 +196,47 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           fetchSorteos(selectedSorteoProceso);
           fetchNecesidades(selectedSorteoProceso);
 
-          const channel = supabase.channel('sorteos-changes')
+          // 1. Canal Realtime Dual (Broadcast instantáneo + Postgres Changes)
+          const liveChannel = supabase.channel('sorteos-live-tracking')
+              .on('broadcast', { event: 'sorteo-status-changed' }, (data: any) => {
+                  const p = data.payload;
+                  if (p && (!p.procesoId || p.procesoId === selectedSorteoProceso)) {
+                      console.log('[Realtime Broadcast] Status changed:', p);
+                      // Actualización reactiva instantánea en estado local
+                      setSorteos(prev => prev.map(item => item.id === p.sorteoId ? {
+                          ...item,
+                          estado_confirmacion: p.estado,
+                          motivo_rechazo: p.motivo !== undefined ? p.motivo : item.motivo_rechazo
+                      } : item));
+
+                      // Notificación visual al operador
+                      if (p.estado === 'Confirmado') {
+                          notify(`🟢 ${p.nombres || 'Personal'} CONFIRMÓ su asistencia (${p.cargo || ''})`, 'success');
+                      } else if (p.estado === 'Rechazado') {
+                          notify(`🔴 ${p.nombres || 'Personal'} DECLINÓ su participación${p.motivo ? `: ${p.motivo}` : ''}`, 'warning');
+                      }
+
+                      // Re-sincronizar silenciosamente para asegurar consistencia total de necesidades y contadores
+                      fetchSorteos(selectedSorteoProceso, true);
+                  }
+              })
               .on('postgres_changes', 
                   { event: '*', schema: 'public', table: 'personal_sorteos', filter: `proceso_id=eq.${selectedSorteoProceso}` }, 
                   (payload) => {
-                      console.log('Realtime update received:', payload);
-                      fetchSorteos(selectedSorteoProceso, true); // silent fetch on change
+                      console.log('[Realtime Postgres] Change received:', payload);
+                      fetchSorteos(selectedSorteoProceso, true);
                   }
               )
               .subscribe();
 
+          // 2. Latido de sincronización continua (Polling silencioso cada 5 segundos)
+          const pollInterval = setInterval(() => {
+              fetchSorteos(selectedSorteoProceso, true);
+          }, 5000);
+
           return () => {
-              supabase.removeChannel(channel);
+              supabase.removeChannel(liveChannel);
+              clearInterval(pollInterval);
           };
       }
   }, [selectedSorteoProceso, activeTab]);
@@ -757,6 +786,30 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
                   description: auditDesc,
                   user_name: user?.name || 'Sistema'
               }]);
+
+              // Difundir broadcast a los demás operadores
+              try {
+                  const bc = supabase.channel('sorteos-live-tracking');
+                  bc.subscribe(async (st) => {
+                      if (st === 'SUBSCRIBED') {
+                          await bc.send({
+                              type: 'broadcast',
+                              event: 'sorteo-status-changed',
+                              payload: {
+                                  sorteoId,
+                                  estado: newState,
+                                  procesoId: selectedSorteoProceso,
+                                  nombres: s.nombres,
+                                  cargo: s.cargo,
+                                  motivo
+                              }
+                          });
+                          setTimeout(() => supabase.removeChannel(bc), 1200);
+                      }
+                  });
+              } catch (bcErr) {
+                  console.warn('Broadcast error:', bcErr);
+              }
           }
           
           fetchSorteos(selectedSorteoProceso, true); // silent reload in background
@@ -1896,6 +1949,14 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
                   {/* Actions (Only show if process selected) */}
                   {selectedSorteoProceso && (
                       <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                          {/* Live Realtime Indicator */}
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold shadow-xs select-none" title="Monitoreo en tiempo real activo. Las confirmaciones y declinaciones se reflejan automáticamente.">
+                              <span className="relative flex h-2.5 w-2.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                              </span>
+                              <span>Tiempo Real</span>
+                          </div>
                           {!isFullScreen && (
                               <button onClick={() => setIsFullScreen(true)} className="bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-900 shadow-sm flex items-center gap-1.5 transition-colors">
                                  <span className="material-symbols-outlined text-[16px]">fullscreen</span> <span className="hidden sm:inline">Modo Extendido</span>

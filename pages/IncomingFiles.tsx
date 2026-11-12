@@ -29,6 +29,7 @@ import {
 
 // Trámites recurrentes oficiales para selección rápida al registrar un nuevo expediente
 const COMMON_SUBJECTS = [
+  "INFORME ESTUDIANTE",
   "CONSTANCIA DE INGRESO",
   "INFORME DE RECTIFICACIÓN DE DATOS",
   "INFORME DE RENUNCIA",
@@ -40,6 +41,7 @@ const COMMON_SUBJECTS = [
 
 // Palabras clave para identificar automáticamente si un expediente entrante corresponde a un flujo recurrente asistido
 const RECURRENT_KEYWORDS = [
+  "ESTUDIANTE",
   "CONSTANCIA",
   "RECTIFIC",
   "RENUNCIA",
@@ -159,6 +161,55 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
   const isConstancia = selectedTemplate ? (selectedTemplate.category === 'Certificados' || selectedTemplate.name.toLowerCase().includes('constancia')) : false;
   const [constanciaMode, setConstanciaMode] = useState<'digital' | 'fisico'>('digital');
   
+  // Authority selection states for templates/reports
+  interface AuthorityOption {
+    id: string;
+    nombre: string;
+    titulo_academico?: string | null;
+    cargo_actual?: string | null;
+    formattedName: string;
+    formattedCargo: string;
+  }
+  const [authorities, setAuthorities] = useState<AuthorityOption[]>([]);
+  const [selectedAuthorityId, setSelectedAuthorityId] = useState<string>('');
+
+  const fetchAuthorities = async () => {
+    try {
+      const { data } = await supabase
+        .from('personal_directorio')
+        .select('id, dni, nombre, titulo_academico, cargo_actual')
+        .not('cargo_actual', 'is', null)
+        .order('nombre');
+
+      if (data) {
+        const formatted: AuthorityOption[] = data.map(p => {
+          const clean = (p.nombre || '').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
+          const parts = clean.split(' ');
+          let formattedName = clean;
+          if (parts.length >= 3) {
+            const apellidos = parts.slice(0, 2).join(' ');
+            const nombres = parts.slice(2).join(' ');
+            formattedName = `${nombres} ${apellidos}`;
+          }
+          const title = p.titulo_academico ? `${p.titulo_academico.trim().toUpperCase()} ` : '';
+          return {
+            id: p.id,
+            nombre: p.nombre,
+            titulo_academico: p.titulo_academico,
+            cargo_actual: p.cargo_actual,
+            formattedName: `${title}${formattedName}`.toUpperCase(),
+            formattedCargo: p.cargo_actual || ''
+          };
+        });
+        setAuthorities(formatted);
+        return formatted;
+      }
+    } catch (err) {
+      console.error('Error fetching authorities:', err);
+    }
+    return [];
+  };
+
   // Manual Data & Preview States
   const [manualValues, setManualValues] = useState<Record<string, string>>({});
   const [detectedVariables, setDetectedVariables] = useState<string[]>([]);
@@ -1667,6 +1718,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                         match = loadedTemplates.find(t => t.name.toUpperCase().includes('INCLUSI'));
                     } else if (subjectUpper.includes('CONSTANCIA')) {
                         match = loadedTemplates.find(t => t.name.toUpperCase().includes('CONSTANCIA'));
+                    } else if (subjectUpper.includes('ESTUDIANTE') || subjectUpper.includes('INFORME ESTUDIANTE')) {
+                        match = loadedTemplates.find(t => t.name.toUpperCase().includes('INFORME ESTUDIANTE') || t.name.toUpperCase().includes('ESTUDIANTE'));
                     }
                 }
                 if (match) setSelectedTemplate(match);
@@ -1967,6 +2020,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           'nombres', 'apellidos', 'dni', 'codigo', 'escuela', 'modalidad', 'nota', 'omerito', 
           'fecha_ingreso', 'anio', 'semestre', 'fecha_actual', 'FECHA_ACTUAL', 'EXP', 
           'NOMBRE', 'CARRERA', 'MODALIDAD', 'CODIGO', 'fecha', 'FECHA',
+          'CODPOSTULANTE', 'codpostulante', 'codigo_estudi', 'codigo_estudiante',
+          'ASUNTO', 'asunto',
           'usuario_iniciales', 'USUARIO_INICIALES', 'usuario', 'USUARIO',
           'codigo_qr', 'CODIGO_QR', 'qr', 'QR'
       ];
@@ -1992,6 +2047,29 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
       if ((manualVars.includes('NOMBRECORRE') || isRect) && selectedStudent) {
           preFilledValues['NOMBRECORRE'] = selectedStudent.NOMBRE;
       }
+
+      // Pre-fill Authorities from Actas de Sesiones
+      let loadedAuths = authorities;
+      if (loadedAuths.length === 0) {
+        loadedAuths = await fetchAuthorities();
+      }
+
+      const hasAuthorityVar = manualVars.some(v => 
+        ['AUTORIDAD_NOMBRE', 'AUTORIDAD_CARGO', 'A_NOMBRE', 'A_CARGO', 'AUTORIDAD'].includes(v as string)
+      );
+
+      if (hasAuthorityVar && loadedAuths.length > 0) {
+        const defaultAuth = loadedAuths.find(a => a.nombre.includes('LAVILLA')) || loadedAuths[0];
+        if (defaultAuth) {
+          setSelectedAuthorityId(defaultAuth.id);
+          if (manualVars.includes('AUTORIDAD_NOMBRE')) preFilledValues['AUTORIDAD_NOMBRE'] = defaultAuth.formattedName;
+          if (manualVars.includes('AUTORIDAD_CARGO')) preFilledValues['AUTORIDAD_CARGO'] = defaultAuth.formattedCargo;
+          if (manualVars.includes('A_NOMBRE')) preFilledValues['A_NOMBRE'] = defaultAuth.formattedName;
+          if (manualVars.includes('A_CARGO')) preFilledValues['A_CARGO'] = defaultAuth.formattedCargo;
+        }
+      }
+
+
 
       // Generar código y QR de verificación pública oficial si es necesario
       try {
@@ -2059,9 +2137,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           '{{nombres}}': selectedStudent.NOMBRE,
           '{{NOMBRE}}': selectedStudent.NOMBRE,
           '{{apellidos}}': '', 
+          '{{CODPOSTULANTE}}': selectedStudent.CODPOSTULANTE,
+          '{{codpostulante}}': selectedStudent.CODPOSTULANTE,
           '{{dni}}': selectedStudent.CODPOSTULANTE,
           '{{codigo}}': selectedStudent.CODPOSTULANTE,
           '{{CODIGO}}': selectedStudent.CODPOSTULANTE,
+          '{{codigo_estudi}}': selectedStudent.CODPOSTULANTE,
+          '{{codigo_estudiante}}': selectedStudent.CODPOSTULANTE,
           '{{escuela}}': selectedStudent.CARRERA,
           '{{CARRERA}}': selectedStudent.CARRERA,
           '{{modalidad}}': selectedStudent.MODALIDAD,
@@ -2076,6 +2158,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           '{{fecha}}': dateStr,
           '{{FECHA}}': dateStr,
           '{{EXP}}': fileToAttend.number,
+          '{{ASUNTO}}': fileToAttend.subject || 'INFORME ESTUDIANTE',
+          '{{asunto}}': fileToAttend.subject || 'INFORME ESTUDIANTE',
           '{{usuario_iniciales}}': userInitials,
           '{{USUARIO_INICIALES}}': userInitials,
           '{{usuario}}': userInitials,
@@ -2121,6 +2205,23 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           content = content
               .replace(/{{NOMBRE_CORRECTO}}/gi, manualValues['NOMBRECORRE'])
               .replace(/{{NOMBRE_RECTIFICADO}}/gi, manualValues['NOMBRECORRE']);
+      }
+
+      // Reemplazos de Autoridad Destinataria (Actas de Sesiones)
+      if (manualValues['AUTORIDAD_NOMBRE'] || manualValues['A_NOMBRE']) {
+          const authNom = manualValues['AUTORIDAD_NOMBRE'] || manualValues['A_NOMBRE'];
+          content = content
+              .replace(/{{AUTORIDAD_NOMBRE}}/g, authNom)
+              .replace(/{{A_NOMBRE}}/g, authNom);
+      }
+      if (manualValues['AUTORIDAD_CARGO'] || manualValues['A_CARGO']) {
+          const authCargo = manualValues['AUTORIDAD_CARGO'] || manualValues['A_CARGO'];
+          content = content
+              .replace(/{{AUTORIDAD_CARGO}}/g, authCargo)
+              .replace(/{{A_CARGO}}/g, authCargo);
+      }
+      if (manualValues['ASUNTO']) {
+          content = content.replace(/{{ASUNTO}}/g, manualValues['ASUNTO']);
       }
 
       // 3. Garantizar justificación profesional y elegante del cuerpo del documento
@@ -3782,6 +3883,54 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                         )}
 
                                         <div className="flex flex-col gap-4">
+                                            {/* Selector de Autoridad Destinataria (Actas de Sesiones) */}
+                                            {(detectedVariables.includes('AUTORIDAD_NOMBRE') || 
+                                              detectedVariables.includes('AUTORIDAD_CARGO') || 
+                                              detectedVariables.includes('A_NOMBRE') || 
+                                              detectedVariables.includes('A_CARGO') ||
+                                              selectedTemplate?.name?.toUpperCase().includes('ESTUDIANTE')) && (
+                                                <div className="flex flex-col gap-2 p-3.5 rounded-xl border border-indigo-200/90 bg-indigo-50/50">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="material-symbols-outlined text-indigo-700 text-base">badge</span>
+                                                            <span className="text-xs font-bold text-indigo-950">Destinatario / Autoridad Universitaria</span>
+                                                        </div>
+                                                        <span className="text-[9px] font-black text-indigo-700 bg-indigo-100/70 border border-indigo-200 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                            <span className="material-symbols-outlined text-[12px]">how_to_reg</span>
+                                                            Actas de Sesiones
+                                                        </span>
+                                                    </div>
+                                                    <select
+                                                        value={selectedAuthorityId}
+                                                        onChange={e => {
+                                                            const authId = e.target.value;
+                                                            setSelectedAuthorityId(authId);
+                                                            const chosen = authorities.find(a => a.id === authId);
+                                                            if (chosen) {
+                                                                setManualValues(prev => ({
+                                                                    ...prev,
+                                                                    AUTORIDAD_NOMBRE: chosen.formattedName,
+                                                                    AUTORIDAD_CARGO: chosen.formattedCargo,
+                                                                    A_NOMBRE: chosen.formattedName,
+                                                                    A_CARGO: chosen.formattedCargo
+                                                                }));
+                                                            }
+                                                        }}
+                                                        className="h-11 px-3 rounded-lg border border-indigo-200 bg-white font-semibold text-slate-800 text-xs outline-none focus:border-indigo-600 cursor-pointer shadow-sm"
+                                                    >
+                                                        <option value="">-- Seleccione una Autoridad Registrada --</option>
+                                                        {authorities.map(a => (
+                                                            <option key={a.id} value={a.id}>
+                                                                {a.formattedName} — {a.formattedCargo}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="text-[10px] text-indigo-600/90 font-medium">
+                                                        Al seleccionar una autoridad, se rellenarán automáticamente el Nombre y Cargo oficial en el informe.
+                                                    </p>
+                                                </div>
+                                            )}
+
                                             {detectedVariables.length === 0 ? (
                                                 <div className="p-4 bg-green-50 text-green-700 rounded-xl text-xs font-bold flex items-center gap-2">
                                                     <span className="material-symbols-outlined">check_circle</span>
@@ -3791,7 +3940,13 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                 detectedVariables.map(variable => (
                                                     <label key={variable} className="flex flex-col gap-1.5">
                                                         <div className="flex items-center justify-between ml-1">
-                                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{variable}</span>
+                                                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                                                {variable === 'AUTORIDAD_NOMBRE' ? 'NOMBRE DE LA AUTORIDAD DESTINATARIA (A:)' :
+                                                                 variable === 'AUTORIDAD_CARGO' ? 'CARGO DE LA AUTORIDAD DESTINATARIA' :
+                                                                 variable === 'ASUNTO' ? 'ASUNTO DEL INFORME' :
+                                                                 variable === 'INFORME' ? 'N° DE INFORME OFICIAL' :
+                                                                 variable === 'NOMBRECORRE' ? 'NOMBRE RECTIFICADO' : variable}
+                                                            </span>
                                                             {variable === 'NOMBRECORRE' && (
                                                                 <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
                                                                     Nombre Rectificado

@@ -8,7 +8,7 @@ export interface OfficialTemplateDefinition {
   lastModified?: string;
 }
 
-// Las 5 Plantillas Oficiales Aprobadas de la Dirección de Admisión UNSAAC (Tabla 'templates')
+// Las 6 Plantillas Oficiales Aprobadas de la Dirección de Admisión UNSAAC (Tabla 'templates')
 export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
   {
     id: '13b05103-3352-4c74-a2a4-28af259fe001',
@@ -564,5 +564,150 @@ export const DEFAULT_OFFICIAL_TEMPLATES: OfficialTemplateDefinition[] = [
         </div>
     </div>
 </div>`
+  },
+  {
+    id: 'e5d2b781-64d5-4a37-b6f1-79b8a3200006',
+    name: 'INFORME ESTUDIANTE',
+    description: 'Informe oficial interno dirigido a autoridades universitarias con los datos académicos y de ingreso de un estudiante.',
+    category: 'Admisión',
+    thumbnail: 'https://placehold.co/400x500/1e293b/ffffff?text=INFORME+ESTUDIANTE',
+    lastModified: '12/11/2026',
+    content: `<div style="width: 100%; line-height: 1.35; box-sizing: border-box; padding: 0px 20px; font-family: 'Poppins', sans-serif;">
+    
+    <!-- Importar fuente Poppins -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;900&display=swap');
+    </style>
+
+    <!-- Encabezado Institucional -->
+    <div style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 13px; text-align: right; margin-bottom: 16px; margin-top: -30px;">
+        <div style="color: #7b1523; font-size: 15px; font-weight: 500; font-family: 'Poppins', sans-serif;">UNIVERSIDAD NACIONAL DE</div>
+        <div style="color: #7b1523; font-size: 17px; font-weight: 700; font-family: 'Poppins', sans-serif;">SAN ANTONIO ABAD DEL CUSCO</div>
+        <div style="font-size: 11px; font-weight: 900; letter-spacing: 1px; color: #000; font-family: 'Poppins', sans-serif;">DIRECCIÓN DE ADMISIÓN</div>
+    </div>
+
+    <!-- Título Oficial del Informe -->
+    <div style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 13px; text-align: center; margin-bottom: 12px;">
+        <h3 style="margin: 0; font-size: 15px; font-weight: 900; text-decoration: underline; font-family: 'Poppins', sans-serif;">{{INFORME}}-DA-UNSAAC</h3>
+    </div>
+
+    <!-- Metadatos del Documento -->
+    <table style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 12.5px; width: 100%; margin-bottom: 12px; border: none; line-height: 1.25;">
+        <tbody>
+            <tr>
+                <td style="width: 70px; vertical-align: top; font-weight: 900;">DE</td>
+                <td style="width: 15px; vertical-align: top; font-weight: 900;">:</td>
+                <td style="vertical-align: top;">
+                    <b style="font-weight: 700;">Dr. DENNIS IVAN CANDIA OVIEDO.</b><br>
+                    <span style="font-weight: 300;">Director de la Dirección de Admisión.</span>
+                </td>
+            </tr>
+            <tr><td colspan="3" style="height: 6px;"></td></tr>
+            <tr>
+                <td style="vertical-align: top; font-weight: 900;">A</td>
+                <td style="vertical-align: top; font-weight: 900;">:</td>
+                <td style="vertical-align: top;">
+                    <b style="font-weight: 700;">{{AUTORIDAD_NOMBRE}}</b><br>
+                    <span style="font-weight: 300;">{{AUTORIDAD_CARGO}}</span>
+                </td>
+            </tr>
+            <tr><td colspan="3" style="height: 6px;"></td></tr>
+            <tr>
+                <td style="font-weight: 900;">REF</td>
+                <td style="font-weight: 900;">:</td>
+                <td style="font-weight: 300;">Exp {{EXP}}</td>
+            </tr>
+            <tr><td colspan="3" style="height: 6px;"></td></tr>
+            <tr>
+                <td style="font-weight: 900;">ASUNTO</td>
+                <td style="font-weight: 900;">:</td>
+                <td style="font-weight: 700; color: #7b1523;">{{ASUNTO}}</td>
+            </tr>
+            <tr><td colspan="3" style="height: 6px;"></td></tr>
+            <tr>
+                <td style="font-weight: 900;">FECHA</td>
+                <td style="font-weight: 900;">:</td>
+                <td style="font-weight: 300;">Cusco, {{fecha_actual}}.</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Línea divisoria -->
+    <hr style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 13px; border-right: none; border-bottom: none; border-left: none; border-image: initial; border-top: 1px solid rgb(0, 0, 0); margin-bottom: 12px;">
+
+    <!-- Cuerpo del Informe (Reducido y conciso) -->
+    <div style="text-align: justify; margin-bottom: 12px; font-family: 'Poppins', sans-serif; font-size: 12.5px; line-height: 1.45;">
+        <p style="margin: 0;">
+            Por medio del presente, la Dirección de Admisión remite la información oficial del estudiante Don(ña) <b style="font-weight: 700; color: #000;">{{nombres}}</b>, identificado(a) con Código de Postulante N° <b style="font-weight: 700;">{{CODPOSTULANTE}}</b>, quien según los registros oficiales que obran en esta Dependencia <b>INGRESÓ</b> a la Universidad Nacional de San Antonio Abad del Cusco conforme al siguiente detalle registral:
+        </p>
+    </div>
+
+    <!-- Tabla Oficial de Datos del Estudiante (Compacta) -->
+    <table style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 11.5px; width: 100%; border-collapse: collapse; margin-bottom: 14px;">
+        <tbody>
+            <tr style="background: #f8fafc;">
+                <th style="border: 1px solid #000; padding: 4px 10px; text-align: left; width: 35%; font-weight: 900; color: #7b1523;">CAMPO / REGISTRO</th>
+                <th style="border: 1px solid #000; padding: 4px 10px; text-align: left; font-weight: 900; color: #7b1523;">DETALLE OFICIAL</th>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Apellidos y Nombres</td>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">{{nombres}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Código de Postulante</td>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">{{CODPOSTULANTE}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Escuela Profesional</td>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700; color: #7b1523;">{{escuela}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Modalidad de Ingreso</td>
+                <td style="border: 1px solid #000; padding: 4px 10px;">{{modalidad}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Proceso / Semestre</td>
+                <td style="border: 1px solid #000; padding: 4px 10px;">{{semestre}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Puntaje Obtenido</td>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">{{nota}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Orden de Mérito</td>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">{{omerito}}</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #000; padding: 4px 10px; font-weight: 700;">Fecha de Ingreso / Examen</td>
+                <td style="border: 1px solid #000; padding: 4px 10px;">{{fecha_ingreso}}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <!-- Cierre Institucional -->
+    <div style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 12.5px; margin-bottom: 15px; font-weight: 300;">
+        <p style="margin: 0;">Es cuanto informo a usted, para su conocimiento y los fines consiguientes.</p>
+        <p style="text-align: center; margin: 15px 0 0 0;">Atentamente,</p>
+    </div>
+
+    <!-- Firma y Sello Oficial -->
+    <div style="color: rgb(0, 0, 0); font-family: 'Poppins', sans-serif; font-size: 13px; margin-top: 30px; text-align: center;">
+        <div style="font-size: 10px; font-weight: 900;">UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO</div>
+        <div style="font-size: 10px; font-weight: 900; color: #7b1523; margin-bottom: 28px;">DIRECCIÓN DE ADMISIÓN</div>
+        
+        <div style="width: 250px; margin: 0 auto; border-top: 1px solid #000; padding-top: 4px;">
+            <p style="margin: 0; font-weight: 900; font-size: 12px; color: #7b1523;">Dr. Dennis Ivan Candia Oviedo</p>
+            <p style="margin: 0; font-size: 11px; font-weight: 300;">DIRECTOR</p>
+        </div>
+    </div>
+
+    <!-- Iniciales y Distribución -->
+    <div style="color: rgb(85, 85, 85); font-family: 'Poppins', sans-serif; font-size: 9px; margin-top: 10px; line-height: 1.2; font-weight: 300;">
+        <p style="margin: 0;">DA/{{usuario_iniciales}}</p>
+        <p style="margin: 0;">c.c.</p>
+        <p style="margin: 0;">Archivo.</p>
+    </div>
+</div>
+<img src="https://cnqpzyanmmwspvemcfeb.supabase.co/storage/v1/object/public/plantillas_recursos/firma_1781277215280.png" style="position: absolute; top: 72%; left: 41.3239%; width: 16.0821%; z-index: 9999; mix-blend-mode: multiply; height: auto;">`
   }
 ];
