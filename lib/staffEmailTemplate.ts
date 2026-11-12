@@ -24,22 +24,6 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
           })
         : 'Plazo especificado';
 
-    // Calculate time left
-    let daysLeft = 0;
-    let hoursLeft = 0;
-    let minutesLeft = 0;
-    let hasTimeLeft = false;
-
-    if (data.fechaLimite) {
-        const diffMs = new Date(data.fechaLimite).getTime() - Date.now();
-        if (diffMs > 0) {
-            hasTimeLeft = true;
-            daysLeft = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-            hoursLeft = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-            minutesLeft = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        }
-    }
-
     // Clean user message paragraphs
     const paragraphs = data.customMessage
         .split('\n')
@@ -50,8 +34,10 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/{nombre}/g, data.nombres)
                 .replace(/{cargo}/g, data.cargo)
+                .replace(/{proceso}/g, data.procesoNombre)
                 .replace(/{fecha_examen}/g, data.fechaExamen)
-                .replace(/{fecha_limite}/g, formattedLimite);
+                .replace(/{fecha_limite}/g, formattedLimite)
+                .replace(/{enlace_confirmacion}/g, ''); // Guarantee {enlace_confirmacion} is never printed as raw text
             return `<p style="margin: 0 0 14px 0; font-size: 15px; line-height: 1.6; color: #334155;">${formatted}</p>`;
         })
         .join('');
@@ -61,7 +47,7 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Convocatoria de Personal Sorteado - UNSAAC</title>
+  <title>Convocatoria por Sorteo - Admisión UNSAAC</title>
   <style>
     @keyframes pulse-dot {
       0% { transform: scale(0.95); opacity: 0.8; }
@@ -95,9 +81,6 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
         display: block !important;
         text-align: center !important;
       }
-      .time-col {
-        padding: 6px 10px !important;
-      }
     }
   </style>
 </head>
@@ -105,7 +88,7 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
 
   <!-- PREHEADER (Opción F: Texto de vista previa en la bandeja de entrada de Gmail) -->
   <div style="display: none; font-size: 1px; color: #f1f5f9; line-height: 1px; max-height: 0px; max-width: 0px; opacity: 0; overflow: hidden; mso-hide: all;">
-    ⚡ URGENTE: Ha sido seleccionado para ${data.cargo} en el ${data.procesoNombre}. Confirme su asistencia antes del ${formattedLimite}.
+    ⚡ CONVOCATORIA POR SORTEO: Seleccionado/a para ${data.cargo} en el ${data.procesoNombre}. Confirme su asistencia antes del ${formattedLimite}.
     &#847; &zwnj; &nbsp; &#8199; &shy; &#847; &zwnj; &nbsp; &#8199; &shy; &#847; &zwnj; &nbsp; &#8199; &shy; &#847; &zwnj; &nbsp; &#8199; &shy;
   </div>
 
@@ -124,11 +107,12 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                     <p style="margin: 0; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #fde047; text-transform: uppercase;">
                       UNIVERSIDAD NACIONAL DE SAN ANTONIO ABAD DEL CUSCO
                     </p>
-                    <h1 style="margin: 6px 0 0 0; font-size: 19px; font-weight: 900; color: #ffffff; letter-spacing: 0.5px;">
+                    <h1 style="margin: 6px 0 0 0; font-size: 20px; font-weight: 900; color: #ffffff; letter-spacing: 0.5px;">
                       DIRECCIÓN DE ADMISIÓN
                     </h1>
-                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #e2e8f0; font-weight: 500;">
-                      CONVOCATORIA Y DESIGNACIÓN OFICIAL DE PERSONAL
+                    <!-- SUBTÍTULO: NOMBRE DEL EXAMEN -->
+                    <p style="margin: 6px 0 0 0; font-size: 13px; color: #fde047; font-weight: 800; letter-spacing: 0.8px; text-transform: uppercase;">
+                      ${data.procesoNombre}
                     </p>
                   </td>
                 </tr>
@@ -140,21 +124,21 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
           <tr>
             <td style="padding: 28px 24px;">
 
-              <!-- MENSAJE PERSONALIZADO -->
+              <!-- MENSAJE DE SALUDO Y COMUNICACIÓN -->
               <div style="margin-bottom: 22px;">
                 ${paragraphs}
               </div>
 
-              <!-- TARJETA DE ACREDITACIÓN / CREDENCIAL (Opción A) -->
+              <!-- DETALLE DEL SORTEO OFICIAL (Opción A - No redundante) -->
               <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid #790000; border-radius: 12px; margin-bottom: 24px;">
                 <tr>
                   <td style="padding: 18px 20px;">
                     <p style="margin: 0 0 12px 0; font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #790000; text-transform: uppercase;">
-                      📋 FICHA DE ASIGNACIÓN DE PERSONAL
+                      📋 RESULTADO DEL SORTEO OFICIAL
                     </p>
                     <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
                       <tr>
-                        <td style="padding: 5px 0; font-size: 13px; color: #64748b; width: 35%;"><strong>Personal:</strong></td>
+                        <td style="padding: 5px 0; font-size: 13px; color: #64748b; width: 35%;"><strong>Personal Sorteado:</strong></td>
                         <td style="padding: 5px 0; font-size: 14px; color: #0f172a; font-weight: 700;">${data.nombres}</td>
                       </tr>
                       ${data.dni ? `
@@ -163,11 +147,11 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                         <td style="padding: 5px 0; font-size: 14px; color: #0f172a; font-weight: 700;">${data.dni}</td>
                       </tr>` : ''}
                       <tr>
-                        <td style="padding: 5px 0; font-size: 13px; color: #64748b;"><strong>Proceso:</strong></td>
+                        <td style="padding: 5px 0; font-size: 13px; color: #64748b;"><strong>Proceso de Admisión:</strong></td>
                         <td style="padding: 5px 0; font-size: 13px; color: #0f172a; font-weight: 600;">${data.procesoNombre}</td>
                       </tr>
                       <tr>
-                        <td style="padding: 5px 0; font-size: 13px; color: #64748b;"><strong>Cargo Asignado:</strong></td>
+                        <td style="padding: 5px 0; font-size: 13px; color: #64748b;"><strong>Rubro / Cargo Sorteado:</strong></td>
                         <td style="padding: 5px 0;">
                           <span style="display: inline-block; background-color: #fef3c7; color: #92400e; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid #fde68a;">
                             ${data.cargo}
@@ -183,43 +167,21 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                 </tr>
               </table>
 
-              <!-- CONTADOR REGRESIVO Y PLAZO DE RESPUESTA (Opción D) -->
-              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #fffbeb; border: 1px solid #fef3c7; border-radius: 12px; margin-bottom: 26px; text-align: center;">
+              <!-- PLAZO LÍMITE OFICIAL DE RESPUESTA (Sin reloj estático congelado) -->
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #fffbeb; border: 1.5px solid #fde68a; border-radius: 12px; margin-bottom: 26px; text-align: center;">
                 <tr>
                   <td style="padding: 18px 16px;">
-                    <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 0.8px;">
+                    <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 0.8px;">
                       ⏳ PLAZO LÍMITE PARA RESPONDER
                     </p>
-                    <p style="margin: 0 0 14px 0; font-size: 14px; font-weight: 700; color: #b45309;">
+                    <p style="margin: 0 0 12px 0; font-size: 15px; font-weight: 800; color: #b45309;">
                       ${formattedLimite}
                     </p>
                     
-                    ${hasTimeLeft ? `
-                    <!-- BLOQUES DE TIEMPO DIGITALES -->
-                    <table role="presentation" border="0" cellspacing="0" cellpadding="0" style="margin: 0 auto 10px auto;">
-                      <tr>
-                        <td class="time-col" style="padding: 8px 14px; background-color: #ffffff; border: 1px solid #fde68a; border-radius: 8px; text-align: center;">
-                          <span style="font-size: 18px; font-weight: 900; color: #92400e; display: block;">${String(daysLeft).padStart(2, '0')}</span>
-                          <span style="font-size: 9px; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: 0.5px;">DÍAS</span>
-                        </td>
-                        <td style="padding: 0 6px; font-size: 18px; font-weight: 900; color: #d97706;">:</td>
-                        <td class="time-col" style="padding: 8px 14px; background-color: #ffffff; border: 1px solid #fde68a; border-radius: 8px; text-align: center;">
-                          <span style="font-size: 18px; font-weight: 900; color: #92400e; display: block;">${String(hoursLeft).padStart(2, '0')}</span>
-                          <span style="font-size: 9px; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: 0.5px;">HORAS</span>
-                        </td>
-                        <td style="padding: 0 6px; font-size: 18px; font-weight: 900; color: #d97706;">:</td>
-                        <td class="time-col" style="padding: 8px 14px; background-color: #ffffff; border: 1px solid #fde68a; border-radius: 8px; text-align: center;">
-                          <span style="font-size: 18px; font-weight: 900; color: #92400e; display: block;">${String(minutesLeft).padStart(2, '0')}</span>
-                          <span style="font-size: 9px; font-weight: 800; color: #b45309; text-transform: uppercase; letter-spacing: 0.5px;">MINUTOS</span>
-                        </td>
-                      </tr>
-                    </table>
-                    ` : ''}
-
-                    <div style="display: inline-block; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 20px; padding: 4px 12px; margin-top: 4px;">
+                    <div style="display: inline-block; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 20px; padding: 4px 14px;">
                       <span class="dot-pulse" style="color: #ef4444; font-size: 10px; vertical-align: middle;">●</span>
                       <span style="font-size: 11px; font-weight: 700; color: #b91c1c; vertical-align: middle; margin-left: 4px;">
-                        RESPUESTA OBLIGATORIA PARA CONFIRMACIÓN DE PLANILLA
+                        CONFIRMACIÓN OBLIGATORIA PARA PLANILLA OFICIAL
                       </span>
                     </div>
                   </td>
@@ -257,18 +219,19 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                 </tr>
               </table>
 
-              <p style="margin: 25px 0 0 0; font-size: 12px; color: #94a3b8; text-align: center; line-height: 1.5;">
-                * Al hacer clic en cualquiera de las opciones se abrirá una ventana segura del sistema oficial de admisión para registrar su decisión o justificación.
+              <!-- NOTA DE IMPEDIMENTO / JUSTIFICACIÓN -->
+              <p style="margin: 22px 0 0 0; font-size: 13px; color: #475569; text-align: center; line-height: 1.6;">
+                En caso de presentar algún impedimento justificado que le imposibilite participar, por favor presione <strong>"No Podré Asistir"</strong> para registrar el motivo a la brevedad posible y coordinar oportunamente con el personal suplente.
               </p>
 
             </td>
           </tr>
 
-          <!-- PIE DE PÁGINA INSTITUCIONAL -->
+          <!-- PIE DE PÁGINA INSTITUCIONAL (Solo Dirección de Admisión - UNSAAC) -->
           <tr>
             <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 20px; text-align: center;">
               <p style="margin: 0; font-size: 12px; font-weight: 700; color: #64748b;">
-                Dirección de Admisión y Centro de Cómputo - UNSAAC
+                Dirección de Admisión - UNSAAC
               </p>
               <p style="margin: 4px 0 0 0; font-size: 11px; color: #94a3b8;">
                 Ciudad Universitaria de Perayoc, Av. de la Cultura 733, Cusco - Perú

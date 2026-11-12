@@ -1071,21 +1071,11 @@ _Si ya respondió a esta convocatoria mediante su correo electrónico, por favor
 
 Reciba un cordial saludo.
 
-Por medio del presente, le informamos que, según el sorteo realizado para la designación de personal administrativo que participará en el **${procNombre}**, usted ha sido seleccionado/a para desempeñarse en el rubro **{cargo}**.
+Por medio del presente, se le comunica que, según el sorteo público realizado para la designación de personal que participará en el **${procNombre}**, usted ha resultado seleccionado/a para desempeñar la función que se detalla en el siguiente cuadro.
 
-El examen se llevará a cabo el día **{fecha_examen}**.
+Le solicitamos confirmar o declinar su disponibilidad a la brevedad posible dentro del plazo indicado.
 
-Para confirmar su participación, le solicitamos hacer clic en el siguiente enlace hasta el **{fecha_limite}**:
-
-{enlace_confirmacion}
-
-En caso de presentar algún impedimento que le imposibilite participar, le agradeceremos comunicarlo a la brevedad posible ingresando al mismo enlace, a fin de realizar las coordinaciones correspondientes.
-
-Agradecemos de antemano su compromiso y colaboración con el proceso de admisión.
-
-Atentamente,
-Dirección de Admisión
-UNSAAC`);
+Agradecemos de antemano su valiosa colaboración y compromiso con el normal desarrollo del concurso de admisión.`);
     setShowEmailModal(true);
   };
 
