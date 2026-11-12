@@ -7,6 +7,7 @@ import { User, PersonalDirectorio, PersonalProceso, PersonalNecesidad, PersonalS
 import { useReactToPrint } from 'react-to-print';
 import { ScheduleBuilderModal } from '../components/ScheduleBuilderModal';
 import { RubroAttendanceModal } from '../components/RubroAttendanceModal';
+import { generateStaffNotificationHtml } from '../lib/staffEmailTemplate';
 
 interface StaffManagementProps {
   user: User;
@@ -120,6 +121,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const [emailFechaLimite, setEmailFechaLimite] = useState('');
   const [emailFechaExamen, setEmailFechaExamen] = useState('');
   const [emailProgress, setEmailProgress] = useState<{ current: number, total: number, message: string } | null>(null);
+  const [emailModalTab, setEmailModalTab] = useState<'form' | 'preview'>('form');
 
   // Communication Modal State
   const [showCommModal, setShowCommModal] = useState(false);
@@ -1061,6 +1063,7 @@ _Si ya respondió a esta convocatoria mediante su correo electrónico, por favor
     const proc = procesos.find(p => p.id === selectedSorteoProceso);
     const procNombre = proc?.nombre || 'proceso de admisión';
     
+    setEmailModalTab('form');
     setEmailSubject(`Convocatoria ${procNombre}`);
     setEmailFechaLimite('');
     setEmailFechaExamen('');
@@ -1110,6 +1113,9 @@ UNSAAC`);
                 message: `Enviando correo a ${persona.nombres} (${i + 1}/${pendientes.length})...` 
             });
 
+            const proc = procesos.find(p => p.id === selectedSorteoProceso);
+            const procNombre = proc?.nombre || 'Proceso de Admisión UNSAAC';
+
             const resolvePublicUrl = () => {
                 let origin = window.location.origin;
                 if (origin.includes('localhost') && import.meta.env.VITE_API_URL) {
@@ -1118,6 +1124,8 @@ UNSAAC`);
                 return origin;
             };
             const confirmLinkBase = `${resolvePublicUrl()}/#/staff-confirm?id=${persona.id}`;
+            const confirmUrl = `${confirmLinkBase}&action=confirm`;
+            const declineUrl = `${confirmLinkBase}&action=decline`;
             const formattedLimite = emailFechaLimite 
                 ? new Date(emailFechaLimite).toLocaleString('es-PE', { dateStyle: 'long', timeStyle: 'short' })
                 : '';
@@ -1128,27 +1136,20 @@ UNSAAC`);
                 .replace(/{cargo}/g, persona.cargo)
                 .replace(/{fecha_examen}/g, emailFechaExamen)
                 .replace(/{fecha_limite}/g, formattedLimite)
-                .replace(/{enlace_confirmacion}/g, `Confirmar: ${confirmLinkBase}&action=confirm\nRechazar: ${confirmLinkBase}&action=decline`);
+                .replace(/{enlace_confirmacion}/g, `Confirmar: ${confirmUrl}\nRechazar: ${declineUrl}`);
                 
-            const buttonsHtml = `
-              <div style="text-align: center; margin: 30px 0; font-family: sans-serif;">
-                <p style="margin-bottom: 20px; font-weight: bold; color: #1e1e24;">Por favor, indíquenos su disponibilidad:</p>
-                <div style="display: flex; justify-content: center; gap: 16px;">
-                  <a href="${confirmLinkBase}&action=confirm" style="display:inline-block;padding:12px 24px;background-color:#10b981;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px;min-width:120px;">SÍ, CONFIRMO</a>
-                  <a href="${confirmLinkBase}&action=decline" style="display:inline-block;padding:12px 24px;background-color:#ef4444;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;font-size:14px;min-width:120px;">NO PODRÉ</a>
-    </div>
-    </div>
-            `;
+            const htmlBody = generateStaffNotificationHtml({
+                nombres: persona.nombres,
+                dni: persona.dni || '',
+                cargo: persona.cargo,
+                procesoNombre: procNombre,
+                fechaExamen: emailFechaExamen,
+                fechaLimite: emailFechaLimite,
+                customMessage: emailTemplate,
+                confirmUrl,
+                declineUrl
+            });
 
-            const htmlBody = emailTemplate
-                .replace(/\n/g, '<br/>')
-                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                .replace(/{nombre}/g, persona.nombres)
-                .replace(/{cargo}/g, persona.cargo)
-                .replace(/{fecha_examen}/g, emailFechaExamen)
-                .replace(/{fecha_limite}/g, formattedLimite)
-                .replace(/{enlace_confirmacion}/g, buttonsHtml);
-            
             const res = await fetch('/api/send-email', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2278,84 +2279,160 @@ UNSAAC`);
       )}
 
       {/* Email Notification Modal */}
-      {showEmailModal && (
+      {showEmailModal && (() => {
+        const samplePerson = filteredSorteos.find(s => s.estado_confirmacion === 'Pendiente' && s.email_personal && !s.notificado) || filteredSorteos[0] || { nombres: 'DOCENTE / ADMINISTRATIVO DE EJEMPLO', dni: '12345678', cargo: 'CONTROL DE AULA' };
+        const proc = procesos.find(p => p.id === selectedSorteoProceso);
+        const procNombre = proc?.nombre || 'PROCESO DE ADMISIÓN UNSAAC';
+        const previewHtml = generateStaffNotificationHtml({
+            nombres: samplePerson.nombres,
+            dni: samplePerson.dni || '12345678',
+            cargo: samplePerson.cargo,
+            procesoNombre: procNombre,
+            fechaExamen: emailFechaExamen || 'Domingo, 17 de Mayo de 2026',
+            fechaLimite: emailFechaLimite || new Date(Date.now() + 86400000 * 2).toISOString(),
+            customMessage: emailTemplate,
+            confirmUrl: '#',
+            declineUrl: '#'
+        });
+
+        return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-white rounded-2xl w-full max-w-3xl shadow-xl overflow-hidden flex flex-col max-h-[92vh]">
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                    <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                        <span className="material-symbols-outlined text-primary">mail</span> 
-                        Generar Notificación de Correo
-                    </h3>
+                    <div className="flex items-center gap-3">
+                        <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                            <span className="material-symbols-outlined text-primary">mail</span> 
+                            Notificación Institucional de Personal
+                        </h3>
+                        {/* Pestañas de Vista */}
+                        <div className="flex items-center bg-slate-200/80 p-0.5 rounded-lg border border-slate-300">
+                            <button
+                                type="button"
+                                onClick={() => setEmailModalTab('form')}
+                                className={`px-2.5 py-1 text-xs font-bold rounded-md flex items-center gap-1 transition-all ${
+                                    emailModalTab === 'form' 
+                                        ? 'bg-white text-slate-900 shadow-sm' 
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                <span className="material-symbols-outlined text-[15px]">edit_note</span> Redacción
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setEmailModalTab('preview')}
+                                className={`px-2.5 py-1 text-xs font-bold rounded-md flex items-center gap-1 transition-all ${
+                                    emailModalTab === 'preview' 
+                                        ? 'bg-primary text-white shadow-sm' 
+                                        : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                <span className="material-symbols-outlined text-[15px]">visibility</span> Vista Previa Gmail
+                            </button>
+                        </div>
+                    </div>
                     <button onClick={() => setShowEmailModal(false)} className="text-slate-400 hover:text-slate-600">
                         <span className="material-symbols-outlined">close</span>
                     </button>
-    </div>
+                </div>
+
                 <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4">
-                    <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2">
-                        <span className="material-symbols-outlined text-[20px]">info</span>
-                        <p>Se enviará este correo a <strong>{filteredSorteos.filter(s => s.estado_confirmacion === 'Pendiente' && s.email_personal && !s.notificado).length}</strong> persona(s) filtrada(s) que tienen estado PENDIENTE, tienen correo registrado y NO han sido notificadas.</p>
-    </div>
+                    {emailModalTab === 'form' ? (
+                        <>
+                            <div className="bg-blue-50 text-blue-800 p-3 rounded-lg text-sm flex gap-2">
+                                <span className="material-symbols-outlined text-[20px]">info</span>
+                                <p>Se enviará este correo a <strong>{filteredSorteos.filter(s => s.estado_confirmacion === 'Pendiente' && s.email_personal && !s.notificado).length}</strong> persona(s) con correo registrado que están PENDIENTES de notificación.</p>
+                            </div>
 
+                            <div>
+                                <label className="block text-xs font-bold tracking-wider text-slate-500 mb-1">ASUNTO DEL CORREO</label>
+                                <input type="text" value={emailSubject} onChange={e => setEmailSubject(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary font-bold text-slate-800" />
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+                                    <label className="block text-xs font-bold tracking-wider text-blue-800 mb-1">
+                                        FECHA DEL EXAMEN <span className="text-blue-500 font-normal normal-case">(Ej. Domingo, 17 de Mayo)</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        value={emailFechaExamen} 
+                                        onChange={e => setEmailFechaExamen(e.target.value)} 
+                                        placeholder="Escribe la fecha aquí..."
+                                        className="w-full border border-blue-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
+                                    />
+                                </div>
+                                <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
+                                    <label className="block text-xs font-bold tracking-wider text-amber-800 mb-1">
+                                        FECHA LÍMITE DE RESPUESTA
+                                    </label>
+                                    <input 
+                                        type="datetime-local" 
+                                        value={emailFechaLimite} 
+                                        onChange={e => setEmailFechaLimite(e.target.value)} 
+                                        className="w-full border border-amber-200 rounded-lg p-2 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500" 
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold tracking-wider text-slate-500 mb-1">CUERPO DEL MENSAJE (Personalizable)</label>
+                                <div className="text-xs text-slate-500 mb-2 leading-relaxed bg-slate-100 p-2.5 rounded-lg">
+                                    <strong>Etiquetas dinámicas:</strong> <code>{'{nombre}'}</code>, <code>{'{cargo}'}</code>, <code>{'{fecha_examen}'}</code>, <code>{'{fecha_limite}'}</code>.<br/>
+                                    <span className="text-emerald-700 font-medium">✨ Incluye automáticamente la Cabecera Institucional UNSAAC, la Ficha de Asignación, el Contador de Plazo y los Botones Dinámicos de confirmación.</span>
+                                </div>
+                                <textarea 
+                                    value={emailTemplate} 
+                                    onChange={e => setEmailTemplate(e.target.value)} 
+                                    className="w-full border border-slate-200 rounded-lg p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono bg-slate-50 min-h-[220px]"
+                                ></textarea>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex-1 flex flex-col gap-2">
+                            <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-lg text-xs text-emerald-900 flex items-center justify-between">
+                                <span>📱 <strong>Vista previa exacta en Gmail:</strong> Así visualizará el personal sorteado el correo tanto en celular como en computadora.</span>
+                            </div>
+                            <div className="border border-slate-200 rounded-xl overflow-hidden min-h-[460px] bg-slate-100">
+                                <iframe 
+                                    title="Vista Previa de Correo"
+                                    srcDoc={previewHtml}
+                                    className="w-full h-full min-h-[460px] border-none bg-white"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
                     <div>
-                        <label className="block text-xs font-bold tracking-wider text-slate-500 mb-1">ASUNTO DEL CORREO</label>
-                        <input type="text" value={emailSubject} onChange={e => setEmailSubject(e.target.value)} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary font-bold text-slate-800" />
-    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100">
-                            <label className="block text-xs font-bold tracking-wider text-blue-800 mb-1">
-                                FECHA DEL EXAMEN <span className="text-blue-500 font-normal normal-case">(Ej. Sábado, 24 de Enero)</span>
-                            </label>
-                            <input 
-                                type="text" 
-                                value={emailFechaExamen} 
-                                onChange={e => setEmailFechaExamen(e.target.value)} 
-                                placeholder="Escribe la fecha aquí..."
-                                className="w-full border border-blue-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" 
-                            />
-    </div>
-                        <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
-                            <label className="block text-xs font-bold tracking-wider text-amber-800 mb-1">
-                                FECHA LÍMITE DE RESPUESTA
-                            </label>
-                            <input 
-                                type="datetime-local" 
-                                value={emailFechaLimite} 
-                                onChange={e => setEmailFechaLimite(e.target.value)} 
-                                className="w-full border border-amber-200 rounded-lg p-2 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500" 
-                            />
-    </div>
-    </div>
-
-                    <div>
-                        <label className="block text-xs font-bold tracking-wider text-slate-500 mb-1">CUERPO DEL CORREO (Puedes editarlo)</label>
-                        <div className="text-xs text-slate-500 mb-2 leading-relaxed bg-slate-100 p-2 rounded-lg">
-                            <strong>Etiquetas dinámicas (se reemplazan solas):</strong> <br/>
-                            <div className="grid grid-cols-2 gap-1 mt-1">
-                                <span><code>{'{nombre}'}</code> = Nombre de la persona</span>
-                                <span><code>{'{cargo}'}</code> = Cargo asignado</span>
-                                <span><code>{'{enlace_confirmacion}'}</code> = Botón de enlace</span>
-                                <span><code>{'{fecha_examen}'}</code> = Fecha descrita arriba</span>
-                                <span><code>{'{fecha_limite}'}</code> = Fecha límite (formateada)</span>
-    </div>
-                            <div className="mt-2"><strong>Formato:</strong> Usa <code>**texto**</code> para poner palabras en <strong>negrilla</strong>.</div>
-    </div>
-                        <textarea 
-                            value={emailTemplate} 
-                            onChange={e => setEmailTemplate(e.target.value)} 
-                            className="w-full border border-slate-200 rounded-lg p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary font-mono bg-slate-50 min-h-[350px]"
-                        ></textarea>
-    </div>
-    </div>
-                <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
-                    <button onClick={() => setShowEmailModal(false)} className="px-5 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-200 transition-colors">Cancelar</button>
-                    <button onClick={sendEmailNotifications} className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[18px]">send</span> Enviar Correos
-                    </button>
-    </div>
-    </div>
-    </div>
-      )}
+                        {emailModalTab === 'form' ? (
+                            <button 
+                                type="button"
+                                onClick={() => setEmailModalTab('preview')}
+                                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1.5 shadow-sm"
+                            >
+                                <span className="material-symbols-outlined text-[16px]">visibility</span> Ver Vista Previa Gmail
+                            </button>
+                        ) : (
+                            <button 
+                                type="button"
+                                onClick={() => setEmailModalTab('form')}
+                                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 transition-colors flex items-center gap-1.5 shadow-sm"
+                            >
+                                <span className="material-symbols-outlined text-[16px]">edit_note</span> Volver a Editar
+                            </button>
+                        )}
+                    </div>
+                    <div className="flex gap-3">
+                        <button onClick={() => setShowEmailModal(false)} className="px-5 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-200 transition-colors">Cancelar</button>
+                        <button onClick={sendEmailNotifications} className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-sm">
+                            <span className="material-symbols-outlined text-[18px]">send</span> Enviar Notificaciones
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        );
+      })()}
 
       {/* WhatsApp Reminder Modal */}
       {showWhatsAppModal && (() => {
