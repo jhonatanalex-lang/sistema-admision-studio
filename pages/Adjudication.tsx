@@ -41,7 +41,6 @@ const ESCUELAS_POR_AREA = {
     "Zootecnia",
     "Odontología",
     "Ingeniería Forestal",
-    "Ingeniería Agroambiental",
     "Medicina Veterinaria",
   ],
   C: ["Ciencias Administrativas", "Contabilidad", "Economía", "Turismo"],
