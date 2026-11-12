@@ -174,16 +174,9 @@ export function generateStaffNotificationHtml(data: StaffEmailData): string {
                     <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 800; color: #92400e; text-transform: uppercase; letter-spacing: 0.8px;">
                       ⏳ PLAZO LÍMITE PARA RESPONDER
                     </p>
-                    <p style="margin: 0 0 12px 0; font-size: 15px; font-weight: 800; color: #b45309;">
+                    <p style="margin: 0; font-size: 15px; font-weight: 800; color: #b45309;">
                       ${formattedLimite}
                     </p>
-                    
-                    <div style="display: inline-block; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 20px; padding: 4px 14px;">
-                      <span class="dot-pulse" style="color: #ef4444; font-size: 10px; vertical-align: middle;">●</span>
-                      <span style="font-size: 11px; font-weight: 700; color: #b91c1c; vertical-align: middle; margin-left: 4px;">
-                        CONFIRMACIÓN OBLIGATORIA PARA PLANILLA OFICIAL
-                      </span>
-                    </div>
                   </td>
                 </tr>
               </table>

@@ -18,8 +18,8 @@ const DEFAULT_CARGOS = [
   'VERIFICACIÓN DE DOCUMENTOS Y FOTOGRAFÍA',
   'RECEPCIÓN DE EXPEDIENTES DE INGRESANTES',
   'SERVICIO DE CARPETEROS',
-  'SERVICIOS DIVERSOS(SOLO VARONES)',
-  'SERVICIO DE SEGURIDAD(SOLO VARONES)',
+  'SERVICIOS DIVERSOS',
+  'SERVICIO DE SEGURIDAD (SOLO VARONES)',
   'SERVICIO DE LIMPIEZA DE PABELLONES Y SSHH',
   'CAMAROGRAFOS',
   'PERIFONISTA'
@@ -65,7 +65,24 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const [dbCargos, setDbCargos] = useState<PersonalCargo[]>([]);
 
   // Helper de normalización para asegurar consistencia
-  const normalizeCargoName = (c: string) => (c || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  const normalizeCargoName = (c: string): string => {
+    const raw = (c || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (raw === 'CAMAROGRAFO' || raw === 'CAMAROGRAFOS') return 'CAMAROGRAFOS';
+    if (raw === 'PERIFONEO' || raw === 'PERIFONISTA') return 'PERIFONISTA';
+    if (raw.includes('LIMPIEZA') && (raw.includes('HIGIÉNICO') || raw.includes('HIGIENICO') || raw.includes('PABELLÓN') || raw.includes('PABELLON') || raw.includes('SSHH'))) {
+      return 'SERVICIO DE LIMPIEZA DE PABELLONES Y SSHH';
+    }
+    if (raw.includes('REVISIÓN Y RECEPCION') || raw.includes('REVISION Y RECEPCION') || raw.includes('RECEPCIÓN DE EXPEDIENTES') || raw.includes('RECEPCION DE EXPEDIENTES')) {
+      return 'RECEPCIÓN DE EXPEDIENTES DE INGRESANTES';
+    }
+    if (raw.startsWith('SERVICIOS DIVERSOS')) {
+      return 'SERVICIOS DIVERSOS';
+    }
+    if (raw.startsWith('SERVICIO DE SEGURIDAD')) {
+      return 'SERVICIO DE SEGURIDAD (SOLO VARONES)';
+    }
+    return raw;
+  };
 
   // Sorteos State
   const [sorteos, setSorteos] = useState<PersonalSorteo[]>([]);
@@ -76,9 +93,9 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   // Catálogo unificado disponible para este proceso (Cargos permanentes + Necesidades registradas + Sorteados)
   const availableProcessCargos = useMemo(() => {
       const set = new Set<string>();
-      dbCargos.forEach(c => { if (c.nombre) set.add(normalizeCargoName(c.nombre)); });
       necesidades.forEach(n => { if (n.cargo) set.add(normalizeCargoName(n.cargo)); });
       sorteos.forEach(s => { if (s.cargo) set.add(normalizeCargoName(s.cargo)); });
+      dbCargos.forEach(c => { if (c.nombre) set.add(normalizeCargoName(c.nombre)); });
       return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [dbCargos, necesidades, sorteos]);
 
