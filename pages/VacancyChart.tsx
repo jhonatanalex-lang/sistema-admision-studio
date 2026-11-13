@@ -640,6 +640,8 @@ export const VacancyChart: React.FC<{ user: User, notify: (msg: string, type?: T
           let calcValue = 0;
           if (m.id === oppositePivotModId) {
             calcValue = 0;
+          } else if (!isCusco && m.nombre.toUpperCase().includes('INTENSIVO')) {
+            calcValue = 0;
           } else {
             const pctStr = m.peso_porcentaje.replace('%', '').replace(',', '.').trim();
             const pct = parseFloat(pctStr) || 0;

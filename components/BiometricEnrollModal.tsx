@@ -445,19 +445,19 @@ export const BiometricEnrollModal: React.FC<Props> = ({ isOpen, onClose, person,
           {/* Person Info Banner */}
           <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl w-full text-left flex items-center gap-3">
             <div className="size-10 bg-primary text-white rounded-xl flex items-center justify-center font-black text-sm shrink-0">
-              {person.nombre ? person.nombre.charAt(0).toUpperCase() : 'P'}
+              {(person.nombre || person.nombres || 'P').charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-bold text-sm text-slate-900 leading-snug truncate">
-                {person.nombre}
+                {person.nombre || person.nombres || 'Personal'}
               </p>
               <div className="flex items-center gap-2 mt-0.5 text-xs text-slate-500">
                 <span className="font-mono font-bold bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-700">
                   DNI: {person.dni}
                 </span>
-                {person.departamento_cargo && (
+                {(person.departamento_cargo || person.cargo) && (
                   <span className="truncate text-[11px]">
-                    {person.departamento_cargo}
+                    {person.departamento_cargo || person.cargo}
                   </span>
                 )}
               </div>

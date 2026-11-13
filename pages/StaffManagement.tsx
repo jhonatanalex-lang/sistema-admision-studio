@@ -34,7 +34,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   // Directorio State
   const [directorio, setDirectorio] = useState<PersonalDirectorio[]>([]);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
-  const [enrollPerson, setEnrollPerson] = useState<PersonalDirectorio | null>(null);
+  const [enrollPerson, setEnrollPerson] = useState<any | null>(null);
   const [dirSearch, setDirSearch] = useState('');
   const [dirPage, setDirPage] = useState(0);
   const [dirTotalItems, setDirTotalItems] = useState(0);
@@ -122,7 +122,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const [dirSearchResults, setDirSearchResults] = useState<PersonalDirectorio[]>([]);
   const [showDirSearch, setShowDirSearch] = useState(false);
 
-  const [sorteoFilters, setSorteoFilters] = useState({ search: '', cargo: '', condicion: '', estado: '' });
+  const [sorteoFilters, setSorteoFilters] = useState({ search: '', cargo: '', condicion: '', estado: '', huella: '' });
 
   // WhatsApp Notification State
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -165,6 +165,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
           'Nombres': s.nombres,
           'Cargo': s.cargo,
           'Condición': s.condicion_sorteo,
+          'Huella Asignada': s.has_fingerprint ? 'SÍ' : 'NO',
           'Estado': s.estado_confirmacion,
           'Correo': s.email_personal,
           'Teléfono': s.telefono,
@@ -398,7 +399,33 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const fetchSorteos = async (procesoId: string, silent = false) => {
       if (!silent) setLoading(true);
       const { data, error } = await supabase.from('personal_sorteos').select('*').eq('proceso_id', procesoId);
-      if (!error && data) setSorteos(data);
+      if (!error && data) {
+          const dnis = Array.from(new Set(data.map(d => (d.dni ? String(d.dni).trim() : '')).filter(Boolean)));
+          const enrolledDnis = new Set<string>();
+
+          if (dnis.length > 0) {
+              const chunkSize = 200;
+              for (let i = 0; i < dnis.length; i += chunkSize) {
+                  const chunk = dnis.slice(i, i + chunkSize);
+                  const { data: fingerprints, error: fpErr } = await supabase
+                      .from('fingerprint_templates')
+                      .select('dni')
+                      .in('dni', chunk);
+                  if (!fpErr && fingerprints) {
+                      fingerprints.forEach(f => {
+                          if (f.dni) enrolledDnis.add(String(f.dni).trim());
+                      });
+                  }
+              }
+          }
+
+          const dataWithFingerprints = data.map(d => ({
+              ...d,
+              has_fingerprint: enrolledDnis.has(d.dni ? String(d.dni).trim() : '')
+          }));
+
+          setSorteos(dataWithFingerprints);
+      }
       if (!silent) setLoading(false);
   }
 
@@ -1003,7 +1030,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
                 matchEstado = s.estado_confirmacion === sorteoFilters.estado;
             }
 
-            return matchSearch && matchCargo && matchCondicion && matchEstado;
+            let matchHuella = true;
+            if (sorteoFilters.huella === 'con_huella') {
+                matchHuella = !!s.has_fingerprint;
+            } else if (sorteoFilters.huella === 'sin_huella') {
+                matchHuella = !s.has_fingerprint;
+            }
+
+            return matchSearch && matchCargo && matchCondicion && matchEstado && matchHuella;
         });
       
       // Order by Cargo first, then Condicion (Titular first), then Name
@@ -1020,6 +1054,14 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
       });
       return result;
   }, [sorteos, sorteoFilters]);
+
+  // == Huella Stats Summary ==
+  const huellaStats = useMemo(() => {
+      const total = sorteos.length;
+      const conHuella = sorteos.filter(s => s.has_fingerprint).length;
+      const sinHuella = total - conHuella;
+      return { total, conHuella, sinHuella };
+  }, [sorteos]);
 
   // == Dashboard Summary ==
   const sorteoDashboardStats = useMemo(() => {
@@ -2163,6 +2205,11 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
                                 <option value="">Todos los Estados</option>
                                 {uniqueEstadosSorteos.map(e => <option key={e} value={e}>{e}</option>)}
                             </select>
+                            <select value={sorteoFilters.huella} onChange={e => setSorteoFilters({...sorteoFilters, huella: e.target.value})} className="p-2 text-xs border border-slate-200 rounded-lg outline-none cursor-pointer bg-white font-medium text-slate-700">
+                                <option value="">Todas las Huellas ({huellaStats.total})</option>
+                                <option value="con_huella">🟢 Con Huella ({huellaStats.conHuella})</option>
+                                <option value="sin_huella">🔴 Sin Huella ({huellaStats.sinHuella})</option>
+                            </select>
     </div>
                         <div className="overflow-x-auto max-h-[600px]">
                             <table className="w-full text-left border-collapse">
@@ -2184,11 +2231,44 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
                                               {idx + 1}
                                            </td>
                                            <td className="p-4">
-                                              <p className="font-bold text-slate-900 leading-tight flex items-center gap-1">
-                                                 {s.nombres}
-                                                 {s.notificado && <span className="bg-blue-100 text-blue-700 text-[8px] px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider ml-1" title="Notificado por Correo">Notificado</span>}
-                                              </p>
-                                              <p className="font-mono text-[10px] text-slate-500 mt-0.5">{s.dni}</p>
+                                              <div className="flex items-center gap-2.5">
+                                                 {/* LED Indicador de Huella Asignada */}
+                                                 <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEnrollPerson({
+                                                            id: s.id,
+                                                            dni: s.dni,
+                                                            nombre: s.nombres,
+                                                            nombres: s.nombres,
+                                                            cargo: s.cargo,
+                                                            departamento_cargo: s.cargo,
+                                                            condicion: s.condicion_sorteo,
+                                                            has_fingerprint: s.has_fingerprint
+                                                        });
+                                                        setEnrollModalOpen(true);
+                                                    }}
+                                                    className="group/led relative p-0.5 rounded-full hover:bg-slate-100 transition-all focus:outline-none flex-shrink-0"
+                                                    title={s.has_fingerprint ? "Huella Asignada: REGISTRADA (Clic para verificar o re-enrolar)" : "Huella Asignada: NO REGISTRADA (Clic para enrolar huella)"}
+                                                 >
+                                                    <span 
+                                                        className={`inline-block w-2.5 h-2.5 rounded-full transition-transform group-hover/led:scale-125 ${
+                                                            s.has_fingerprint 
+                                                                ? 'bg-emerald-500 ring-2 ring-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.85)]' 
+                                                                : 'bg-rose-500 ring-2 ring-rose-200 shadow-[0_0_8px_rgba(244,63,94,0.75)]'
+                                                        }`}
+                                                    />
+                                                 </button>
+
+                                                 <div className="min-w-0">
+                                                    <p className="font-bold text-slate-900 leading-tight flex items-center gap-1">
+                                                       <span className="truncate">{s.nombres}</span>
+                                                       {s.notificado && <span className="bg-blue-100 text-blue-700 text-[8px] px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider ml-1 flex-shrink-0" title="Notificado por Correo">Notificado</span>}
+                                                    </p>
+                                                    <p className="font-mono text-[10px] text-slate-500 mt-0.5">{s.dni}</p>
+                                                 </div>
+                                              </div>
                                            </td>
                                            <td className="p-4 font-bold text-slate-700 text-[10px] uppercase leading-tight max-w-[150px]">
                                               {s.cargo}
@@ -2236,6 +2316,30 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
                                                            <span className="material-symbols-outlined text-[16px]">chat</span>
                                                         </button>
                                                     )}
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setEnrollPerson({
+                                                                id: s.id,
+                                                                dni: s.dni,
+                                                                nombre: s.nombres,
+                                                                nombres: s.nombres,
+                                                                cargo: s.cargo,
+                                                                departamento_cargo: s.cargo,
+                                                                condicion: s.condicion_sorteo,
+                                                                has_fingerprint: s.has_fingerprint
+                                                            });
+                                                            setEnrollModalOpen(true);
+                                                        }}
+                                                        title={s.has_fingerprint ? "Verificar / Actualizar Huella Digital" : "Enrolar Huella Digital"}
+                                                        className={`p-1.5 rounded-lg transition-colors ${
+                                                            s.has_fingerprint 
+                                                                ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' 
+                                                                : 'bg-slate-100 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
+                                                        }`}
+                                                    >
+                                                       <span className="material-symbols-outlined text-[16px]">fingerprint</span>
+                                                    </button>
                                                     <button onClick={() => confirmParticipant(s.id, 'Confirmado')} title="Confirmar Manual" className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors">
                                                        <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
                                                     </button>
@@ -3020,6 +3124,9 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
           setEnrollModalOpen(false);
           setEnrollPerson(null);
           fetchDirectorio();
+          if (selectedSorteoProceso) {
+            fetchSorteos(selectedSorteoProceso, true);
+          }
         }}
         person={enrollPerson}
         notify={notify}

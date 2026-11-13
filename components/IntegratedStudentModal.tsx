@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Participant } from '../types';
 import { StudentDocument, getDocumentStreamUrl } from '../lib/fileGateway';
 import { DocumentViewerModal } from './DocumentViewerModal';
+import { ExportStudentSheetModal } from './ExportStudentSheetModal';
 import { fixCareerName, isApplicantAdmitted } from '../pages/StudentLookup';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -82,6 +83,7 @@ export const IntegratedStudentModal: React.FC<IntegratedStudentModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'perfil' | 'trayectoria' | 'documentos'>('perfil');
   const [selectedDocForViewer, setSelectedDocForViewer] = useState<StudentDocument | null>(null);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   if (!data) return null;
 
@@ -301,7 +303,7 @@ export const IntegratedStudentModal: React.FC<IntegratedStudentModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={generatePDF}
+                onClick={() => setIsExportModalOpen(true)}
                 className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border border-slate-700"
                 title="Descargar Ficha en PDF"
               >
@@ -765,6 +767,16 @@ export const IntegratedStudentModal: React.FC<IntegratedStudentModalProps> = ({
           document={selectedDocForViewer}
           streamUrl={getDocumentStreamUrl(selectedDocForViewer.path, gatewayUrl)}
           onClose={() => setSelectedDocForViewer(null)}
+        />
+      )}
+
+      {/* Selector modal to export institutional student sheet PDF */}
+      {isExportModalOpen && (
+        <ExportStudentSheetModal
+          data={data}
+          gatewayUrl={gatewayUrl}
+          onClose={() => setIsExportModalOpen(false)}
+          onFallbackJsPDF={generatePDF}
         />
       )}
     </>

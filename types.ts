@@ -493,6 +493,7 @@ export interface PersonalSorteo {
   fecha_limite_confirmacion?: string;
   horario_data?: any[];
   created_at: string;
+  has_fingerprint?: boolean;
 }
 
 export interface PreRevisionArchivo {
