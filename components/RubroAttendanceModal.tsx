@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -49,7 +49,24 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'kiosk' | 'history'>('kiosk');
   const [dniInput, setDniInput] = useState('');
+
+  // 1:N Biometric Identification State (Huella Directa -> Firma)
+  const [rubroTemplates, setRubroTemplates] = useState<{ id: string; template: string }[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [serviceOnline, setServiceOnline] = useState<boolean | null>(null);
+  const [isListeningBiometric, setIsListeningBiometric] = useState(false);
+  const [identifyStatus, setIdentifyStatus] = useState<'IDLE' | 'LISTENING' | 'SCANNING' | 'SUCCESS' | 'NO_MATCH' | 'ERROR'>('IDLE');
+  const [identifyMessage, setIdentifyMessage] = useState<string>('Inicializando estación biométrica...');
+  const identifyAbortController = useRef<AbortController | null>(null);
+  const isLoopActive = useRef<boolean>(false);
+
+  // Contingencia de DNI (Acceso Restringido Exclusivo a Administrador / Director)
+  const [showAdminContingency, setShowAdminContingency] = useState(false);
   const [records, setRecords] = useState<RubroAttendanceRecord[]>([]);
+  const recordsRef = useRef<RubroAttendanceRecord[]>([]);
+  useEffect(() => {
+    recordsRef.current = records;
+  }, [records]);
   const [loading, setLoading] = useState(false);
 
   // Filters for Report tab
@@ -182,7 +199,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
 
   // Biometric state
   const [modalStep, setModalStep] = useState<'BIOMETRIC' | 'SIGNATURE'>('SIGNATURE');
-  const [biometricMethod, setBiometricMethod] = useState<'HUELLA_Y_FIRMA' | 'SOLO_FIRMA'>('SOLO_FIRMA');
+  const [biometricMethod, setBiometricMethod] = useState<'HUELLA_Y_FIRMA' | 'SOLO_FIRMA' | 'MANUAL_DNI_ADMIN'>('SOLO_FIRMA');
   const [fingerprintStatus, setFingerprintStatus] = useState<'IDLE' | 'SCANNING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -271,6 +288,202 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     }
   };
 
+  // === FUNCIONES DE IDENTIFICACIÓN BIOMÉTRICA 1:N (HUELLA DIRECTA) ===
+  const loadRubroTemplates = useCallback(async () => {
+    if (!eligibleSorteos || eligibleSorteos.length === 0) {
+      setRubroTemplates([]);
+      return;
+    }
+
+    setLoadingTemplates(true);
+    try {
+      const dnis = Array.from(new Set(eligibleSorteos.map(s => (s.dni ? String(s.dni).trim() : '')).filter(Boolean)));
+      if (dnis.length === 0) {
+        setRubroTemplates([]);
+        return;
+      }
+
+      const loaded: { id: string; template: string }[] = [];
+      const chunkSize = 200;
+      for (let i = 0; i < dnis.length; i += chunkSize) {
+        const chunk = dnis.slice(i, i + chunkSize);
+        const { data, error } = await supabase
+          .from('fingerprint_templates')
+          .select('dni, template_base64')
+          .in('dni', chunk);
+        if (!error && data) {
+          data.forEach(item => {
+            if (item.dni && item.template_base64) {
+              loaded.push({
+                id: String(item.dni).trim(),
+                template: item.template_base64
+              });
+            }
+          });
+        }
+      }
+      setRubroTemplates(loaded);
+    } catch (err) {
+      console.error('Error cargando plantillas biométricas del rubro:', err);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }, [eligibleSorteos]);
+
+  const checkServiceHealth = useCallback(async () => {
+    const serverUrl = getBiometricServerUrl();
+    try {
+      const res = await fetch(`${serverUrl}/ping`, { method: 'GET', signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        setServiceOnline(true);
+        return true;
+      }
+    } catch {
+      // offline
+    }
+    setServiceOnline(false);
+    return false;
+  }, []);
+
+  const stopBiometricListening = () => {
+    isLoopActive.current = false;
+    if (identifyAbortController.current) {
+      identifyAbortController.current.abort();
+      identifyAbortController.current = null;
+    }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsListeningBiometric(false);
+    setIdentifyStatus('IDLE');
+    setIdentifyMessage('Sensor en pausa.');
+  };
+
+  const startBiometricIdentification = async (templatesToUse?: { id: string; template: string }[]) => {
+    if (isLoopActive.current) return;
+    const tList = templatesToUse || rubroTemplates;
+    if (!tList || tList.length === 0) {
+      setIdentifyStatus('IDLE');
+      setIdentifyMessage('No hay huellas enroladas para este rubro. El Administrador debe usar la contingencia.');
+      return;
+    }
+
+    const serverUrl = getBiometricServerUrl();
+    const isOnline = await checkServiceHealth();
+    if (!isOnline) {
+      setIdentifyStatus('ERROR');
+      setIdentifyMessage('Sensor biométrico desconectado o aplicación puente inactiva en localhost:8081.');
+      return;
+    }
+
+    isLoopActive.current = true;
+    setIsListeningBiometric(true);
+    setIdentifyStatus('LISTENING');
+    setIdentifyMessage('Lector activo: coloque su dedo sobre el sensor biométrico...');
+
+    listenNextFingerprint(tList);
+  };
+
+  const listenNextFingerprint = async (tList: { id: string; template: string }[]) => {
+    if (!isLoopActive.current) return;
+
+    const serverUrl = getBiometricServerUrl();
+    try {
+      if (identifyAbortController.current) {
+        identifyAbortController.current.abort();
+      }
+      identifyAbortController.current = new AbortController();
+
+      setIdentifyStatus('SCANNING');
+      setIdentifyMessage('Sensor en espera. Apoye su huella en el lector...');
+
+      const res = await fetch(`${serverUrl}/identify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templates: tList }),
+        signal: identifyAbortController.current.signal
+      });
+
+      if (!isLoopActive.current) return;
+
+      const data = await res.json();
+
+      if (data && data.success && data.identified && data.matchedId) {
+        // ¡Coincidencia encontrada!
+        const cleanMatchedDni = String(data.matchedId).trim();
+        const personMatch = eligibleSorteos.find(
+          s => s.dni.trim() === cleanMatchedDni || s.dni.trim().padStart(8, '0') === cleanMatchedDni.padStart(8, '0')
+        );
+
+        if (personMatch) {
+          setIdentifyStatus('SUCCESS');
+          setIdentifyMessage(`¡Identificado: ${personMatch.nombres}! Abriendo firma...`);
+
+          const todayStr = getTodayString();
+          const todayPersonRecords = recordsRef.current.filter(r => r.dni === personMatch.dni && r.fecha === todayStr);
+
+          let nextType: 'INGRESO' | 'SALIDA' = 'INGRESO';
+          if (todayPersonRecords.length === 0) {
+            nextType = 'INGRESO';
+          } else if (todayPersonRecords.length === 1 && todayPersonRecords[0].tipo === 'INGRESO') {
+            nextType = 'SALIDA';
+          } else if (todayPersonRecords.length >= 2) {
+            notify(`El personal ${personMatch.nombres} ya registró su INGRESO y SALIDA para el día de hoy.`, 'info');
+            setIdentifyStatus('IDLE');
+            setIdentifyMessage(`El personal ${personMatch.nombres} ya completó su asistencia de hoy.`);
+            setTimeout(() => {
+              if (isLoopActive.current) listenNextFingerprint(tList);
+            }, 3000);
+            return;
+          } else {
+            nextType = 'SALIDA';
+          }
+
+          // Pausar escucha mientras firma
+          isLoopActive.current = false;
+          setIsListeningBiometric(false);
+
+          // Abrir modal de firma directamente
+          setPendingPerson(personMatch);
+          setPendingTipo(nextType);
+          setBiometricMethod('HUELLA_Y_FIRMA');
+          setModalStep('SIGNATURE');
+          setSignatureModalOpen(true);
+          return;
+        } else {
+          setIdentifyStatus('NO_MATCH');
+          setIdentifyMessage(`Huella de DNI ${cleanMatchedDni} no pertenece a este rubro (${cargo}).`);
+          notify(`DNI ${cleanMatchedDni} no está asignado a este cargo.`, 'warning');
+        }
+      } else {
+        if (data && data.identified === false) {
+          setIdentifyStatus('NO_MATCH');
+          setIdentifyMessage('Huella no reconocida en este rubro o no asignada.');
+          notify('Huella no reconocida en este rubro.', 'error');
+        }
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
+      console.warn('Error en escucha biométrica:', err);
+      setIdentifyStatus('ERROR');
+      setIdentifyMessage('Lector en pausa. Presione reanudar para volver a escuchar.');
+      isLoopActive.current = false;
+      setIsListeningBiometric(false);
+      return;
+    }
+
+    if (isLoopActive.current) {
+      setTimeout(() => {
+        if (isLoopActive.current) {
+          listenNextFingerprint(tList);
+        }
+      }, 2000);
+    }
+  };
+
   // Helper date
   const getTodayString = () => new Date().toISOString().split('T')[0];
 
@@ -347,8 +560,24 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     if (isOpen) {
       fetchRecords();
       setDniInput('');
+      loadRubroTemplates();
+      checkServiceHealth();
+    } else {
+      stopBiometricListening();
     }
+    return () => {
+      stopBiometricListening();
+    };
   }, [isOpen, procesoId, cargo]);
+
+  // Iniciar automáticamente la escucha biométrica cuando las plantillas estén listas en la pestaña kiosk
+  useEffect(() => {
+    if (isOpen && activeTab === 'kiosk' && !signatureModalOpen && rubroTemplates.length > 0) {
+      startBiometricIdentification(rubroTemplates);
+    } else if (!isOpen || activeTab !== 'kiosk' || signatureModalOpen) {
+      stopBiometricListening();
+    }
+  }, [isOpen, activeTab, signatureModalOpen, rubroTemplates.length]);
 
   // Sync to safeStorage whenever records change
   const saveRecordsLocallyAndRemote = async (newRecords: RubroAttendanceRecord[], newRecordToInsert?: RubroAttendanceRecord) => {
@@ -479,7 +708,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     }
 
     const todayStr = getTodayString();
-    const todayPersonRecords = records.filter(r => r.dni === personMatch.dni && r.fecha === todayStr);
+    const todayPersonRecords = recordsRef.current.filter(r => r.dni === personMatch.dni && r.fecha === todayStr);
 
     let nextType: 'INGRESO' | 'SALIDA' = 'INGRESO';
 
@@ -495,15 +724,27 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       nextType = 'SALIDA';
     }
 
-    checkBiometricAndProceed(personMatch, nextType);
+    // Detener sensor biométrico y autorizar pase directo a firma bajo método auditado MANUAL_DNI_ADMIN
+    stopBiometricListening();
+    setPendingPerson(personMatch);
+    setPendingTipo(nextType);
+    setBiometricMethod('MANUAL_DNI_ADMIN');
+    setModalStep('SIGNATURE');
+    setSignatureModalOpen(true);
   };
 
   const handleCloseSignatureModal = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    stopBiometricListening();
     setSignatureModalOpen(false);
     setPendingPerson(null);
+    setDniInput('');
+
+    // Reanudar automáticamente la escucha biométrica para la siguiente persona
+    setTimeout(() => {
+      if (activeTab === 'kiosk' && rubroTemplates.length > 0 && !isLoopActive.current) {
+        startBiometricIdentification(rubroTemplates);
+      }
+    }, 400);
   };
 
   // Save confirmed mark with transparent signature
@@ -1121,67 +1362,174 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
           {activeTab === 'kiosk' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              {/* LEFT MAIN STATION */}
+              {/* LEFT MAIN STATION: ESTACIÓN BIOMÉTRICA DE MARCADO DIRECTO (1:N) */}
               <div className="lg:col-span-8 flex flex-col gap-6">
                 <div className="bg-white rounded-3xl p-8 border border-slate-200/80 shadow-sm text-center flex flex-col items-center justify-center relative overflow-hidden">
                   
-                  {/* Decorative bar */}
-                  <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-rose-600 via-indigo-600 to-emerald-500" />
+                  {/* Decorative institutional bar */}
+                  <div className="absolute top-0 left-0 right-0 h-2.5 bg-gradient-to-r from-rose-600 via-indigo-600 to-emerald-500" />
 
-                  <div className="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4 mt-2 border border-slate-200 shadow-inner">
-                    <span className="material-symbols-outlined text-3xl">qr_code_scanner</span>
-                  </div>
+                  {/* Visual Sensor Hologram / LED Animation */}
+                  <div className="relative my-3 flex items-center justify-center">
+                    {(identifyStatus === 'SCANNING' || identifyStatus === 'LISTENING') && (
+                      <div className="absolute w-28 h-28 rounded-full bg-emerald-500/20 animate-ping" />
+                    )}
+                    {identifyStatus === 'SUCCESS' && (
+                      <div className="absolute w-28 h-28 rounded-full bg-emerald-500/30 animate-pulse" />
+                    )}
+                    {identifyStatus === 'NO_MATCH' && (
+                      <div className="absolute w-28 h-28 rounded-full bg-rose-500/20 animate-pulse" />
+                    )}
 
-                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-                    Estación de Marcado
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium mt-1 mb-6">
-                    Use su lector de DNI o ingrese el número manualmente
-                  </p>
-
-                  <form onSubmit={handleAttemptMark} className="w-full max-w-md flex flex-col gap-4">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={dniInput}
-                        onChange={e => setDniInput(e.target.value)}
-                        placeholder="D N I"
-                        maxLength={12}
-                        autoFocus
-                        className="w-full text-center text-3xl font-mono font-black tracking-widest py-4 px-6 rounded-2xl border-2 border-slate-200 focus:border-rose-600 focus:ring-4 focus:ring-rose-500/10 outline-none transition-all placeholder:text-slate-300 uppercase shadow-inner text-slate-900 bg-slate-50/50"
-                      />
-                      <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 text-2xl pointer-events-none">
-                        credit_card
+                    <div className={`w-24 h-24 rounded-3xl flex items-center justify-center border-2 transition-all duration-300 shadow-xl relative z-10 ${
+                      identifyStatus === 'SUCCESS'
+                        ? 'bg-emerald-500 border-emerald-600 text-white scale-105 shadow-emerald-500/30'
+                        : identifyStatus === 'NO_MATCH'
+                        ? 'bg-rose-500 border-rose-600 text-white shadow-rose-500/30'
+                        : identifyStatus === 'ERROR'
+                        ? 'bg-amber-500 border-amber-600 text-white shadow-amber-500/30'
+                        : isListeningBiometric
+                        ? 'bg-gradient-to-br from-emerald-600 to-teal-700 border-emerald-400 text-white ring-8 ring-emerald-100 shadow-emerald-500/20'
+                        : 'bg-slate-100 border-slate-300 text-slate-400'
+                    }`}>
+                      <span className="material-symbols-outlined text-5xl">
+                        {identifyStatus === 'SUCCESS'
+                          ? 'check_circle'
+                          : identifyStatus === 'NO_MATCH'
+                          ? 'person_off'
+                          : identifyStatus === 'ERROR'
+                          ? 'sensors_off'
+                          : 'fingerprint'}
                       </span>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-                      <button
-                        type="submit"
-                        className="w-full py-4 px-6 rounded-2xl bg-slate-800 hover:bg-black text-white font-black text-xs uppercase tracking-wider transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2"
-                      >
-                        <span className="material-symbols-outlined text-lg">check_circle</span>
-                        MARCAR ASISTENCIA
-                      </button>
-
-                      {canManageSorteo && (
-                        <button
-                          type="button"
-                          onClick={() => setManualModalOpen(true)}
-                          className="w-full py-4 px-6 rounded-2xl bg-white hover:bg-slate-100 text-slate-800 font-black text-xs uppercase tracking-wider border-2 border-slate-200 transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2"
-                        >
-                          <span className="material-symbols-outlined text-lg text-indigo-600">edit_calendar</span>
-                          REGULARIZAR MANUAL
-                        </button>
-                      )}
-                    </div>
-                  </form>
-
-                  {/* Cargo notice badge */}
-                  <div className="mt-8 px-4 py-2 bg-indigo-50 border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-800 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base">info</span>
-                    Personal asignado a este cargo: <span className="font-mono font-black text-indigo-950">{eligibleSorteos.length} inscritos</span>
                   </div>
+
+                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mt-1">
+                    Estación Biométrica de Marcado Rápido
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1 mb-4 max-w-md">
+                    {isListeningBiometric
+                      ? 'Coloque su dedo sobre el sensor DigitalPersona. El sistema identificará su asignación automáticamente para firmar la planilla.'
+                      : 'El sensor biométrico se encuentra en espera o desconectado.'}
+                  </p>
+
+                  {/* Estado en tiempo real del lector */}
+                  <div className={`px-4 py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-center gap-2.5 max-w-md w-full transition-all ${
+                    identifyStatus === 'SUCCESS'
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                      : identifyStatus === 'NO_MATCH'
+                      ? 'bg-rose-50 border-rose-300 text-rose-800'
+                      : identifyStatus === 'ERROR'
+                      ? 'bg-amber-50 border-amber-300 text-amber-800'
+                      : isListeningBiometric
+                      ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900 shadow-sm'
+                      : 'bg-slate-100 border-slate-200 text-slate-600'
+                  }`}>
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                      isListeningBiometric ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'
+                    }`} />
+                    <span className="truncate">{identifyMessage}</span>
+                  </div>
+
+                  {/* Botones de control del sensor */}
+                  <div className="flex items-center gap-3 mt-4">
+                    {(!isListeningBiometric || identifyStatus === 'ERROR' || identifyStatus === 'IDLE') ? (
+                      <button
+                        type="button"
+                        onClick={() => startBiometricIdentification(rubroTemplates)}
+                        disabled={loadingTemplates}
+                        className="px-5 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-base">sensors</span>
+                        {loadingTemplates ? 'Cargando plantillas...' : 'Reconectar / Activar Sensor'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={stopBiometricListening}
+                        className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-sm">pause</span>
+                        Pausar Lector
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Conteo de plantillas de este rubro */}
+                  <div className="mt-6 px-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-[11px] font-bold text-slate-600 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-base text-emerald-600">fingerprint</span>
+                    <span>Plantillas biométricas cargadas: <strong className="text-slate-900 font-black">{rubroTemplates.length} de {eligibleSorteos.length}</strong> personas con huella activa en este rubro</span>
+                  </div>
+
+                  {/* MECANISMO DE CONTINGENCIA: EXCLUSIVO DIRECTOR / ADMINISTRADOR */}
+                  {isAdmin && (
+                    <div className="w-full max-w-lg mt-6 pt-6 border-t border-slate-200/80 flex flex-col items-center">
+                      <div className="w-full bg-amber-50/70 border border-amber-200/90 rounded-2xl p-4 flex flex-col gap-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-left">
+                            <span className="material-symbols-outlined text-amber-700 text-lg">admin_panel_settings</span>
+                            <div>
+                              <h4 className="text-xs font-black uppercase tracking-wider text-amber-950">
+                                Mando de Contingencia Administrativa
+                              </h4>
+                              <p className="text-[10px] text-amber-800 font-medium">
+                                Exclusivo Director / Administrador para casos de excepción
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setManualModalOpen(true)}
+                              className="px-3 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-amber-900 font-bold text-[10px] uppercase border border-amber-300 transition-all shadow-sm flex items-center gap-1"
+                              title="Regularización Manual con Sello"
+                            >
+                              <span className="material-symbols-outlined text-xs text-indigo-600">edit_calendar</span>
+                              Regularizar Manual
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setShowAdminContingency(!showAdminContingency)}
+                              className="px-3 py-1.5 rounded-xl bg-amber-700 hover:bg-amber-800 text-white font-bold text-[10px] uppercase transition-all shadow-sm flex items-center gap-1"
+                            >
+                              <span className="material-symbols-outlined text-xs">
+                                {showAdminContingency ? 'visibility_off' : 'pin'}
+                              </span>
+                              {showAdminContingency ? 'Ocultar DNI' : 'Digitar DNI'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {showAdminContingency && (
+                          <form onSubmit={handleAttemptMark} className="pt-2 border-t border-amber-200/60 flex flex-col gap-2.5 animate-in slide-in-from-top-2">
+                            <div className="text-[10px] text-amber-900 bg-white/80 p-2 rounded-lg border border-amber-200 text-left">
+                              ⚠️ <strong>Aviso de Auditoría:</strong> El ingreso manual por DNI se audita en la planilla como <code>MANUAL_DNI_ADMIN</code>.
+                            </div>
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                value={dniInput}
+                                onChange={e => setDniInput(e.target.value)}
+                                placeholder="Ingrese DNI de excepción..."
+                                maxLength={12}
+                                className="flex-1 text-center font-mono font-bold text-sm py-2 px-3 rounded-xl border border-amber-300 focus:border-amber-600 focus:ring-2 focus:ring-amber-500/20 outline-none uppercase bg-white text-slate-900"
+                              />
+                              <button
+                                type="submit"
+                                className="px-4 py-2 bg-amber-800 hover:bg-amber-900 text-white font-black text-[11px] uppercase tracking-wider rounded-xl shadow-sm transition-all flex items-center gap-1.5 shrink-0"
+                              >
+                                <span className="material-symbols-outlined text-sm">how_to_reg</span>
+                                Marcar por DNI
+                              </button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               </div>
 
@@ -1239,6 +1587,12 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                               <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-0.5" title="Validado con Huella Digital">
                                 <span className="material-symbols-outlined text-[11px]">fingerprint</span>
                                 Huella
+                              </span>
+                            )}
+                            {r.metodo_validacion === 'MANUAL_DNI_ADMIN' && (
+                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-300 flex items-center gap-0.5" title="Ingreso excepcional por DNI autorizado por Administrador">
+                                <span className="material-symbols-outlined text-[11px]">admin_panel_settings</span>
+                                DNI Admin
                               </span>
                             )}
                           </div>
