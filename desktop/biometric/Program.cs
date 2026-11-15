@@ -500,7 +500,7 @@ namespace BiometricBridge
         private string HandlePing()
         {
             return "{\"status\":\"online\",\"message\":\"Puente Biometrico Activo v2.0\"," +
-                   "\"readerConnected\":" + (isReaderConnected ? "true" : "true") + "," +
+                   "\"readerConnected\":" + (isReaderConnected ? "true" : "false") + "," +
                    "\"endpoints\":[\"/ping\",\"/capture\",\"/enroll\",\"/verify\",\"/identify\"]}";
         }
         #endregion

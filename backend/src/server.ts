@@ -22,8 +22,8 @@ process.on("unhandledRejection", (reason) => {
 process.on("uncaughtException", (err: any) => {
   console.error("[Server] Uncaught Exception capturada:", err);
   if (err?.code === "EADDRINUSE") {
-    console.error("[Server] El puerto ya está en uso. Saliendo para permitir reinicio limpio...");
-    process.exit(1);
+    console.warn("[Server] El puerto ya está en uso. Continuando con la instancia activa...");
+    return;
   }
 });
 
@@ -203,20 +203,19 @@ async function bootstrap() {
 
   httpServer.on("error", (error: any) => {
     if (error.code === "EADDRINUSE") {
-      console.error(`\n[Server] [ERROR CRITICO] El puerto ${config.PORT} ya está en uso.`);
-    } else {
-      console.error("[Server] Error en servidor HTTP:", error);
+      console.warn(`[Server] El puerto ${config.PORT} ya está en uso por un servicio activo. La aplicación utilizará la instancia existente.`);
+      return;
     }
+    console.error("[Server] Error en servidor HTTP:", error);
     process.exit(1);
   });
 }
 
 bootstrap().catch((error: any) => {
   if (error.code === "EADDRINUSE") {
-    console.error(`\n[Server] [ERROR CRITICO] El puerto ${config.PORT} ya esta siendo utilizado por otra aplicacion.`);
-    console.error(`[Server] Por favor, cierra cualquier otra ventana de comandos o ejecuta 'update.bat' para liberar los puertos y volver a intentarlo.\n`);
-  } else {
-    console.error("[Bootstrap] Error crítico al arrancar la aplicación backend:", error);
+    console.warn(`[Server] El puerto ${config.PORT} ya está siendo utilizado por otra aplicación activa. Continuando.`);
+    return;
   }
+  console.error("[Bootstrap] Error crítico al arrancar la aplicación backend:", error);
   process.exit(1);
 });

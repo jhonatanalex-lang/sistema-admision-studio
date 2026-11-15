@@ -20,9 +20,16 @@ function startBackend() {
   
   try {
     let serverPath = path.join(__dirname, "backend/dist/server.js");
+    if (!fs.existsSync(serverPath)) {
+      serverPath = path.join(app.getAppPath(), "backend/dist/server.js");
+    }
     console.log(`[Electron Main] Inicializando backend Express integrado en: ${serverPath}`);
-    require(serverPath);
-    console.log("[Electron Main] Servidor backend Express local activo y sincronizado en puerto 5000.");
+    if (fs.existsSync(serverPath)) {
+      require(serverPath);
+      console.log("[Electron Main] Servidor backend Express local activo y sincronizado en puerto 5000.");
+    } else {
+      console.warn("[Electron Main] server.js no encontrado en:", serverPath);
+    }
   } catch (err) {
     console.error("[Electron Main] Excepción al inicializar el backend integrado:", err);
   }
