@@ -469,8 +469,6 @@ export const TemplateEditor: React.FC<Props> = ({ user }) => {
                   .replace(/{{codpostulante}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{dni}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{codigo}}/g, studentData.CODPOSTULANTE || '')
-                  .replace(/{{codigo_estudi}}/g, studentData.CODPOSTULANTE || '')
-                  .replace(/{{codigo_estudiante}}/g, studentData.CODPOSTULANTE || '')
                   .replace(/{{escuela}}/g, studentData.CARRERA || '')
                   .replace(/{{modalidad}}/g, studentData.MODALIDAD || '')
                   .replace(/{{nota}}/g, studentData.NOTA || '')

@@ -2020,7 +2020,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           'nombres', 'apellidos', 'dni', 'codigo', 'escuela', 'modalidad', 'nota', 'omerito', 
           'fecha_ingreso', 'anio', 'semestre', 'fecha_actual', 'FECHA_ACTUAL', 'EXP', 
           'NOMBRE', 'CARRERA', 'MODALIDAD', 'CODIGO', 'fecha', 'FECHA',
-          'CODPOSTULANTE', 'codpostulante', 'codigo_estudi', 'codigo_estudiante',
+          'CODPOSTULANTE', 'codpostulante',
           'ASUNTO', 'asunto',
           'usuario_iniciales', 'USUARIO_INICIALES', 'usuario', 'USUARIO',
           'codigo_qr', 'CODIGO_QR', 'qr', 'QR'
@@ -2142,8 +2142,8 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           '{{dni}}': selectedStudent.CODPOSTULANTE,
           '{{codigo}}': selectedStudent.CODPOSTULANTE,
           '{{CODIGO}}': selectedStudent.CODPOSTULANTE,
-          '{{codigo_estudi}}': selectedStudent.CODPOSTULANTE,
-          '{{codigo_estudiante}}': selectedStudent.CODPOSTULANTE,
+
+
           '{{escuela}}': selectedStudent.CARRERA,
           '{{CARRERA}}': selectedStudent.CARRERA,
           '{{modalidad}}': selectedStudent.MODALIDAD,
@@ -2200,6 +2200,15 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
           const escapedKey = `{{${key}}}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           content = content.replace(new RegExp(escapedKey, 'g'), value || '');
       });
+
+      // Manejo específico para código de estudiante universitario (asignado por DIRA / Facultad post-ingreso)
+      const studentCodeVal = (manualValues['codigo_estudi'] || manualValues['codigo_estudiante'] || manualValues['CODIGO_ESTUDIANTE'] || '').trim();
+      if (studentCodeVal) {
+          content = content
+              .replace(/{{codigo_estudi}}/gi, studentCodeVal)
+              .replace(/{{codigo_estudiante}}/gi, studentCodeVal)
+              .replace(/{{CODIGO_ESTUDIANTE}}/gi, studentCodeVal);
+      }
 
       if (manualValues['NOMBRECORRE']) {
           content = content
@@ -2519,6 +2528,7 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                 estudiante_nombre_corregido: hasCorrectedName ? manualValues['NOMBRECORRE'].trim().toUpperCase() : '',
                 estudiante_dni: selectedStudent?.CODPOSTULANTE || '',
                 estudiante_codigo: selectedStudent?.CODPOSTULANTE || '',
+                estudiante_codigo_estudiante: (manualValues['codigo_estudi'] || manualValues['codigo_estudiante'] || '').trim(),
                 carrera: selectedStudent?.CARRERA || '',
                 modalidad: selectedStudent?.MODALIDAD || '',
                 semestre: selectedStudent?.SEMESTRE || '',
@@ -3937,7 +3947,9 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                     Todos los datos están completos.
                                                 </div>
                                             ) : (
-                                                detectedVariables.map(variable => (
+                                                detectedVariables.map(variable => {
+                                                    const isStudentCodeVar = ['codigo_estudi', 'codigo_estudiante', 'CODIGO_ESTUDIANTE'].includes(variable);
+                                                    return (
                                                     <label key={variable} className="flex flex-col gap-1.5">
                                                         <div className="flex items-center justify-between ml-1">
                                                             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
@@ -3945,11 +3957,18 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                                  variable === 'AUTORIDAD_CARGO' ? 'CARGO DE LA AUTORIDAD DESTINATARIA' :
                                                                  variable === 'ASUNTO' ? 'ASUNTO DEL INFORME' :
                                                                  variable === 'INFORME' ? 'N° DE INFORME OFICIAL' :
-                                                                 variable === 'NOMBRECORRE' ? 'NOMBRE RECTIFICADO' : variable}
+                                                                 variable === 'NOMBRECORRE' ? 'NOMBRE RECTIFICADO' :
+                                                                 isStudentCodeVar ? 'CÓDIGO DE ESTUDIANTE (DIRA / FACULTAD)' : variable}
                                                             </span>
                                                             {variable === 'NOMBRECORRE' && (
                                                                 <span className="text-[9px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-full uppercase tracking-wider">
                                                                     Nombre Rectificado
+                                                                </span>
+                                                            )}
+                                                            {isStudentCodeVar && (
+                                                                <span className="text-[9px] font-black text-blue-700 bg-blue-50 border border-blue-200/80 px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                                                    <span className="material-symbols-outlined text-[11px]">badge</span>
+                                                                    Matrícula DIRA (Manual)
                                                                 </span>
                                                             )}
                                                             {variable === 'INFORME' && (
@@ -3974,12 +3993,19 @@ export const IncomingFiles: React.FC<IncomingFilesProps> = ({ user, notify }) =>
                                                             className={`h-12 px-4 rounded-xl border ${
                                                                 variable === 'NOMBRECORRE' 
                                                                     ? 'border-primary/50 bg-primary/[0.02] focus:border-primary font-black uppercase text-primary' 
+                                                                    : isStudentCodeVar
+                                                                    ? 'border-blue-300 bg-blue-50/30 font-bold text-slate-800 focus:bg-white focus:border-blue-600'
                                                                     : 'border-slate-200 bg-slate-50 font-bold text-slate-800 focus:bg-white focus:border-primary'
                                                             } text-sm outline-none transition-all`}
-                                                            placeholder={`Ingrese ${variable}...`}
+                                                            placeholder={
+                                                                isStudentCodeVar
+                                                                    ? 'Ejm: 210450 (Código de estudiante asignado por DIRA)...'
+                                                                    : `Ingrese ${variable}...`
+                                                            }
                                                         />
                                                     </label>
-                                                ))
+                                                    );
+                                                })
                                             )}
 
                                             {/* Tarjeta Compacta: Actualizar en Padrón de Ingresantes */}
