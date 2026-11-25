@@ -103,7 +103,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
       }
@@ -654,8 +654,11 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
     ctx.beginPath();
-    ctx.moveTo(clientX - rect.left, clientY - rect.top);
+    ctx.moveTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
   };
 
   const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
@@ -669,7 +672,10 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
-    ctx.lineTo(clientX - rect.left, clientY - rect.top);
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    ctx.lineTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
     ctx.stroke();
     setHasSignature(true);
   };
@@ -1993,7 +1999,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       {/* SIGNATURE CANVAS MODAL */}
       {signatureModalOpen && pendingPerson && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col border border-slate-200">
+          <div className="bg-white rounded-3xl w-full max-w-2xl sm:max-w-3xl shadow-2xl overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
             
             <div className="p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-3">
@@ -2046,8 +2052,8 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                     <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-1 relative touch-none shadow-inner">
                       <canvas
                         ref={canvasRef}
-                        width={460}
-                        height={180}
+                        width={720}
+                        height={260}
                         onMouseDown={startDrawing}
                         onMouseMove={draw}
                         onMouseUp={stopDrawing}
@@ -2055,11 +2061,14 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                         onTouchStart={startDrawing}
                         onTouchMove={draw}
                         onTouchEnd={stopDrawing}
-                        className="w-full h-[180px] bg-transparent cursor-crosshair rounded-xl"
+                        className="w-full h-[240px] sm:h-[270px] bg-slate-50/40 cursor-crosshair rounded-xl border border-slate-100"
                       />
                       {!hasSignature && (
-                        <div className="absolute inset-0 pointer-events-none flex items-center justify-center text-slate-300 text-xs font-bold uppercase tracking-wider">
-                          Firme aquí usando mouse o pantalla táctil
+                        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center text-slate-300 select-none">
+                          <span className="material-symbols-outlined text-4xl mb-1 text-slate-300/80">draw</span>
+                          <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                            Espacio amplio para firmar (Use mouse, lápiz óptico o pantalla táctil)
+                          </span>
                         </div>
                       )}
                     </div>
