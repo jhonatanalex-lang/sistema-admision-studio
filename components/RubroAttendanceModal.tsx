@@ -80,6 +80,8 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
   const [pendingPerson, setPendingPerson] = useState<PersonalSorteo | null>(null);
   const [pendingTipo, setPendingTipo] = useState<'INGRESO' | 'SALIDA'>('INGRESO');
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [hasSignature, setHasSignature] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -93,6 +95,8 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
   });
   const manualCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [manualIsDrawing, setManualIsDrawing] = useState(false);
+  const manualIsDrawingRef = useRef(false);
+  const manualLastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [manualHasSignature, setManualHasSignature] = useState(false);
 
   // Setup/clear manual canvas
@@ -107,43 +111,126 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
       }
+      manualLastPointRef.current = null;
+      manualIsDrawingRef.current = false;
+      setManualIsDrawing(false);
       setManualHasSignature(false);
     }
   }, [manualModalOpen]);
 
-  const startManualDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    setManualIsDrawing(true);
+  const startManualDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     const canvas = manualCanvasRef.current;
     if (!canvas) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    manualIsDrawingRef.current = true;
+    setManualIsDrawing(true);
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const currentPoint = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+    manualLastPointRef.current = currentPoint;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     ctx.beginPath();
-    ctx.moveTo(clientX - rect.left, clientY - rect.top);
-  };
+    ctx.arc(currentPoint.x, currentPoint.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(currentPoint.x, currentPoint.y);
 
-  const drawManual = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!manualIsDrawing) return;
-    const canvas = manualCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-    ctx.lineTo(clientX - rect.left, clientY - rect.top);
-    ctx.stroke();
     setManualHasSignature(true);
   };
 
-  const stopManualDrawing = () => {
+  const drawManual = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!manualIsDrawingRef.current) return;
+    e.preventDefault();
+    const canvas = manualCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !manualLastPointRef.current) return;
+
+    const native = e.nativeEvent as any;
+    const coalesced = (native && typeof native.getCoalescedEvents === 'function') 
+      ? native.getCoalescedEvents() 
+      : null;
+
+    const pointsToProcess: { clientX: number; clientY: number }[] = [];
+    if (coalesced && coalesced.length > 0) {
+      for (let i = 0; i < coalesced.length; i++) {
+        pointsToProcess.push({ clientX: coalesced[i].clientX, clientY: coalesced[i].clientY });
+      }
+    } else {
+      pointsToProcess.push({ clientX: e.clientX, clientY: e.clientY });
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const pt of pointsToProcess) {
+      const currentPoint = {
+        x: (pt.clientX - rect.left) * scaleX,
+        y: (pt.clientY - rect.top) * scaleY
+      };
+
+      const midPoint = {
+        x: (manualLastPointRef.current.x + currentPoint.x) / 2,
+        y: (manualLastPointRef.current.y + currentPoint.y) / 2
+      };
+
+      ctx.quadraticCurveTo(manualLastPointRef.current.x, manualLastPointRef.current.y, midPoint.x, midPoint.y);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(midPoint.x, midPoint.y);
+
+      manualLastPointRef.current = currentPoint;
+    }
+    setManualHasSignature(true);
+  };
+
+  const stopManualDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!manualIsDrawingRef.current) return;
+    manualIsDrawingRef.current = false;
     setManualIsDrawing(false);
+
+    if (e && manualCanvasRef.current) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+
+    const canvas = manualCanvasRef.current;
+    if (canvas && manualLastPointRef.current) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.lineTo(manualLastPointRef.current.x, manualLastPointRef.current.y);
+        ctx.stroke();
+        ctx.beginPath();
+      }
+    }
+    manualLastPointRef.current = null;
   };
 
   const clearManualCanvas = () => {
@@ -153,6 +240,9 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    manualLastPointRef.current = null;
+    manualIsDrawingRef.current = false;
+    setManualIsDrawing(false);
     setManualHasSignature(false);
   };
 
@@ -634,54 +724,134 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
       }
+      lastPointRef.current = null;
+      isDrawingRef.current = false;
+      setIsDrawing(false);
       setHasSignature(false);
     }
   }, [signatureModalOpen]);
 
-  // Touch & Mouse Drawing Handlers
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  // High-precision Touch, Stylus & Mouse Drawing Handlers (PointerEvents + Bézier Smoothing)
+  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    isDrawingRef.current = true;
     setIsDrawing(true);
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
+    const currentPoint = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+    lastPointRef.current = currentPoint;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Draw an initial clean circular dot for immediate feedback and taps/dots
     ctx.beginPath();
-    ctx.moveTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
-  };
+    ctx.arc(currentPoint.x, currentPoint.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(currentPoint.x, currentPoint.y);
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    ctx.lineTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
-    ctx.stroke();
     setHasSignature(true);
   };
 
-  const stopDrawing = () => {
+  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !lastPointRef.current) return;
+
+    const native = e.nativeEvent as any;
+    const coalesced = (native && typeof native.getCoalescedEvents === 'function') 
+      ? native.getCoalescedEvents() 
+      : null;
+
+    const pointsToProcess: { clientX: number; clientY: number }[] = [];
+    if (coalesced && coalesced.length > 0) {
+      for (let i = 0; i < coalesced.length; i++) {
+        pointsToProcess.push({ clientX: coalesced[i].clientX, clientY: coalesced[i].clientY });
+      }
+    } else {
+      pointsToProcess.push({ clientX: e.clientX, clientY: e.clientY });
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for (const pt of pointsToProcess) {
+      const currentPoint = {
+        x: (pt.clientX - rect.left) * scaleX,
+        y: (pt.clientY - rect.top) * scaleY
+      };
+
+      // Quadratic Bézier smoothing using midpoint
+      const midPoint = {
+        x: (lastPointRef.current.x + currentPoint.x) / 2,
+        y: (lastPointRef.current.y + currentPoint.y) / 2
+      };
+
+      ctx.quadraticCurveTo(lastPointRef.current.x, lastPointRef.current.y, midPoint.x, midPoint.y);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(midPoint.x, midPoint.y);
+
+      lastPointRef.current = currentPoint;
+    }
+    setHasSignature(true);
+  };
+
+  const stopDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
     setIsDrawing(false);
+
+    if (e && canvasRef.current) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+
+    const canvas = canvasRef.current;
+    if (canvas && lastPointRef.current) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.lineTo(lastPointRef.current.x, lastPointRef.current.y);
+        ctx.stroke();
+        ctx.beginPath();
+      }
+    }
+    lastPointRef.current = null;
   };
 
   const clearCanvas = () => {
@@ -691,6 +861,9 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+    lastPointRef.current = null;
+    isDrawingRef.current = false;
+    setIsDrawing(false);
     setHasSignature(false);
   };
 
@@ -2049,19 +2222,17 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-1 relative touch-none shadow-inner">
+                    <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-1 relative touch-none shadow-inner select-none">
                       <canvas
                         ref={canvasRef}
                         width={720}
                         height={260}
-                        onMouseDown={startDrawing}
-                        onMouseMove={draw}
-                        onMouseUp={stopDrawing}
-                        onMouseLeave={stopDrawing}
-                        onTouchStart={startDrawing}
-                        onTouchMove={draw}
-                        onTouchEnd={stopDrawing}
-                        className="w-full h-[240px] sm:h-[270px] bg-slate-50/40 cursor-crosshair rounded-xl border border-slate-100"
+                        onPointerDown={startDrawing}
+                        onPointerMove={draw}
+                        onPointerUp={stopDrawing}
+                        onPointerCancel={stopDrawing}
+                        style={{ touchAction: 'none' }}
+                        className="w-full h-[240px] sm:h-[270px] bg-slate-50/40 cursor-crosshair rounded-xl border border-slate-100 touch-none select-none"
                       />
                       {!hasSignature && (
                         <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center text-slate-300 select-none">
@@ -2217,19 +2388,17 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                     <span className="material-symbols-outlined text-xs">cleaning_services</span> Limpiar
                   </button>
                 </div>
-                <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-1 relative touch-none shadow-inner">
+                <div className="border-2 border-dashed border-slate-300 rounded-2xl bg-white p-1 relative touch-none shadow-inner select-none">
                   <canvas
                     ref={manualCanvasRef}
                     width={400}
                     height={120}
-                    onMouseDown={startManualDrawing}
-                    onMouseMove={drawManual}
-                    onMouseUp={stopManualDrawing}
-                    onMouseLeave={stopManualDrawing}
-                    onTouchStart={startManualDrawing}
-                    onTouchMove={drawManual}
-                    onTouchEnd={stopManualDrawing}
-                    className="w-full h-[120px] bg-transparent cursor-crosshair rounded-xl"
+                    onPointerDown={startManualDrawing}
+                    onPointerMove={drawManual}
+                    onPointerUp={stopManualDrawing}
+                    onPointerCancel={stopManualDrawing}
+                    style={{ touchAction: 'none' }}
+                    className="w-full h-[120px] bg-transparent cursor-crosshair rounded-xl touch-none select-none"
                   />
                   {!manualHasSignature && (
                     <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center text-slate-400 text-[10px] font-bold uppercase tracking-wider text-center p-2">

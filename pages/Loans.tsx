@@ -266,9 +266,11 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
   const [isSubmittingLoan, setIsSubmittingLoan] = useState(false);
   const [receivingLoanId, setReceivingLoanId] = useState<string | null>(null);
   
-  // Signature State (Basic Canvas)
+  // Signature State (High-precision Canvas)
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const isDrawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const [hasSignature, setHasSignature] = useState(false);
 
   // Email API State
@@ -368,71 +370,123 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
     }
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    isDrawingRef.current = true;
+    setIsDrawing(true);
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const currentPoint = {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+    lastPointRef.current = currentPoint;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     if (!hasSignature) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    
-    let clientX, clientY;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = (e as React.MouseEvent).clientX;
-      clientY = (e as React.MouseEvent).clientY;
-    }
-    
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
-
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#000000';
+
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    setIsDrawing(true);
+    ctx.arc(currentPoint.x, currentPoint.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(currentPoint.x, currentPoint.y);
+
+    setHasSignature(true);
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
-    if (!isDrawing) return;
+  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx || !lastPointRef.current) return;
+
+    const native = e.nativeEvent as any;
+    const coalesced = (native && typeof native.getCoalescedEvents === 'function') 
+      ? native.getCoalescedEvents() 
+      : null;
+
+    const pointsToProcess: { clientX: number; clientY: number }[] = [];
+    if (coalesced && coalesced.length > 0) {
+      for (let i = 0; i < coalesced.length; i++) {
+        pointsToProcess.push({ clientX: coalesced[i].clientX, clientY: coalesced[i].clientY });
+      }
+    } else {
+      pointsToProcess.push({ clientX: e.clientX, clientY: e.clientY });
+    }
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    
-    let clientX, clientY;
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = (e as React.MouseEvent).clientX;
-      clientY = (e as React.MouseEvent).clientY;
-    }
-    
-    const x = (clientX - rect.left) * scaleX;
-    const y = (clientY - rect.top) * scaleY;
 
-    ctx.lineTo(x, y);
-    ctx.stroke();
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#000000';
+
+    for (const pt of pointsToProcess) {
+      const currentPoint = {
+        x: (pt.clientX - rect.left) * scaleX,
+        y: (pt.clientY - rect.top) * scaleY
+      };
+
+      const midPoint = {
+        x: (lastPointRef.current.x + currentPoint.x) / 2,
+        y: (lastPointRef.current.y + currentPoint.y) / 2
+      };
+
+      ctx.quadraticCurveTo(lastPointRef.current.x, lastPointRef.current.y, midPoint.x, midPoint.y);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(midPoint.x, midPoint.y);
+
+      lastPointRef.current = currentPoint;
+    }
     setHasSignature(true);
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
     setIsDrawing(false);
+
+    if (e && canvasRef.current) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+
+    const canvas = canvasRef.current;
+    if (canvas && lastPointRef.current) {
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.lineTo(lastPointRef.current.x, lastPointRef.current.y);
+        ctx.stroke();
+        ctx.beginPath();
+      }
+    }
+    lastPointRef.current = null;
   };
 
   const clearSignature = () => {
@@ -441,6 +495,9 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    lastPointRef.current = null;
+    isDrawingRef.current = false;
+    setIsDrawing(false);
     setHasSignature(false);
   };
 
@@ -1226,19 +1283,17 @@ export const Loans: React.FC<LoansProps> = ({ user, notify }) => {
                 <h4 className="text-xs font-black text-primary uppercase tracking-widest">3. Firma Digital (Opcional)</h4>
                 {hasSignature && <button onClick={clearSignature} className="text-[10px] font-bold text-red-500 hover:text-red-600">Limpiar Firma</button>}
               </div>
-              <div className="border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 overflow-hidden relative h-32">
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50 overflow-hidden relative h-32 select-none">
                 <canvas 
                   ref={canvasRef}
                   width={600}
                   height={128}
-                  onMouseDown={startDrawing}
-                  onMouseMove={draw}
-                  onMouseUp={stopDrawing}
-                  onMouseLeave={stopDrawing}
-                  onTouchStart={startDrawing}
-                  onTouchMove={draw}
-                  onTouchEnd={stopDrawing}
-                  className="w-full h-full cursor-crosshair touch-none"
+                  onPointerDown={startDrawing}
+                  onPointerMove={draw}
+                  onPointerUp={stopDrawing}
+                  onPointerCancel={stopDrawing}
+                  style={{ touchAction: 'none' }}
+                  className="w-full h-full cursor-crosshair touch-none select-none"
                 />
                 {!hasSignature && <div className="absolute inset-0 pointer-events-none flex items-center justify-center text-slate-300 text-sm font-bold">Firme aquí</div>}
               </div>
