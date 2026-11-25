@@ -2,6 +2,8 @@ import { BiometricEnrollModal } from "../components/BiometricEnrollModal";
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { supabase } from '../lib/supabaseClient';
 import { User, PersonalDirectorio, PersonalProceso, PersonalNecesidad, PersonalSorteo, CVModalidad, PersonalCargo } from '../types';
 import { useReactToPrint } from 'react-to-print';
@@ -157,7 +159,107 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({ user, notify }
   const handlePrintSorteos = useReactToPrint({
       contentRef: printSorteosRef,
       documentTitle: 'Reporte_Personal_Sorteado',
+      pageStyle: `
+        @page { size: A4 portrait; margin: 12mm 10mm; }
+        @media print {
+          html, body {
+            color-scheme: light !important;
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          * {
+            color-scheme: light !important;
+          }
+        }
+      `
   });
+
+  const handleGeneratePDF = () => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const procesoNombre = procesos.find(p => p.id === selectedSorteoProceso)?.nombre || 'Proceso de Admisión';
+
+    // Header formal UNSAAC
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text('REPORTE DE SORTEOS Y PERSONAL ASIGNADO', 14, 15);
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105); // slate-600
+    doc.text(`Proceso: ${procesoNombre}`, 14, 21);
+    doc.text(`Total Listados: ${filteredSorteos.length} personas | Emisión: ${new Date().toLocaleString('es-PE')}`, 14, 26);
+
+    const headers = [['N°', 'DNI', 'Nombres y Apellidos', 'Condición', 'Cargo Asignado', 'Teléfono / Correo', 'Estado']];
+    const rows = filteredSorteos.map((s, idx) => [
+      idx + 1,
+      s.dni || '-',
+      s.nombres || '-',
+      s.condicion_sorteo || '-',
+      s.cargo || '-',
+      `${s.telefono || '-'}\n${s.email_personal || ''}`.trim(),
+      s.estado_confirmacion || '-'
+    ]);
+
+    autoTable(doc, {
+      head: headers,
+      body: rows,
+      startY: 30,
+      theme: 'grid',
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.5,
+        textColor: [15, 23, 42],
+        fillColor: [255, 255, 255],
+        lineColor: [203, 213, 225],
+        lineWidth: 0.1,
+        font: 'helvetica'
+      },
+      headStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 8,
+        halign: 'left'
+      },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 10 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 50, fontStyle: 'bold' },
+        3: { cellWidth: 24 },
+        4: { cellWidth: 38 },
+        5: { cellWidth: 30, fontSize: 7.5 },
+        6: { cellWidth: 20, halign: 'center' }
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      margin: { top: 30, left: 10, right: 10, bottom: 15 },
+      didDrawPage: (data) => {
+        const pageCount = (doc as any).internal.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(
+          `Página ${data.pageNumber} de ${pageCount}`,
+          doc.internal.pageSize.getWidth() / 2,
+          doc.internal.pageSize.getHeight() - 8,
+          { align: 'center' }
+        );
+      }
+    });
+
+    const safeFilename = `Reporte_Personal_Sorteado_${procesoNombre.replace(/\s+/g, '_').substring(0, 30)}.pdf`;
+    doc.save(safeFilename);
+    setIsReportModalOpen(false);
+    if (notify) {
+      notify('Reporte en PDF generado y descargado exitosamente.', 'success');
+    }
+  };
 
   const handleGenerateExcel = () => {
       const data = filteredSorteos.map(s => ({
@@ -2972,52 +3074,72 @@ Agradecemos de antemano su valiosa colaboración y compromiso con el normal desa
                         <span className="material-symbols-outlined">close</span>
                     </button>
     </div>
-                <div className="p-6 flex flex-col gap-4">
+                <div className="p-6 flex flex-col gap-3">
+                    <button 
+                        onClick={handleGeneratePDF} 
+                        className="w-full px-5 py-3.5 border border-slate-200 rounded-xl flex items-center gap-4 hover:border-emerald-500 hover:bg-emerald-50 transition-colors group text-left"
+                    >
+                        <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                            <span className="material-symbols-outlined">picture_as_pdf</span>
+                        </div>
+                        <div>
+                            <div className="font-bold text-slate-800">Descargar PDF (Recomendado)</div>
+                            <div className="text-xs text-slate-500">Documento nítido sin fondos oscuros</div>
+                        </div>
+                    </button>
                     <button 
                         onClick={() => {
                             setIsReportModalOpen(false);
                             handlePrintSorteos();
                         }} 
-                        className="w-full px-5 py-4 border border-slate-200 rounded-xl flex items-center gap-4 hover:border-emerald-500 hover:bg-emerald-50 transition-colors group text-left"
+                        className="w-full px-5 py-3.5 border border-slate-200 rounded-xl flex items-center gap-4 hover:border-blue-500 hover:bg-blue-50 transition-colors group text-left"
                     >
-                        <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                            <span className="material-symbols-outlined">picture_as_pdf</span>
-    </div>
+                        <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <span className="material-symbols-outlined">print</span>
+                        </div>
                         <div>
-                            <div className="font-bold text-slate-800">Reporte en PDF</div>
-                            <div className="text-xs text-slate-500">Documento listo para imprimir</div>
-    </div>
+                            <div className="font-bold text-slate-800">Imprimir / Vista Previa</div>
+                            <div className="text-xs text-slate-500">Abre cuadro de diálogo de impresión</div>
+                        </div>
                     </button>
                     <button 
                         onClick={handleGenerateExcel} 
-                        className="w-full px-5 py-4 border border-slate-200 rounded-xl flex items-center gap-4 hover:border-green-500 hover:bg-green-50 transition-colors group text-left"
+                        className="w-full px-5 py-3.5 border border-slate-200 rounded-xl flex items-center gap-4 hover:border-green-500 hover:bg-green-50 transition-colors group text-left"
                     >
                         <div className="w-10 h-10 rounded-lg bg-green-100 text-green-600 flex items-center justify-center group-hover:bg-green-600 group-hover:text-white transition-colors">
                             <span className="material-symbols-outlined">table</span>
-    </div>
+                        </div>
                         <div>
                             <div className="font-bold text-slate-800">Reporte en Excel</div>
-                            <div className="text-xs text-slate-500">Hoja de cálculo para exportar</div>
-    </div>
+                            <div className="text-xs text-slate-500">Hoja de cálculo (.xlsx) para exportar</div>
+                        </div>
                     </button>
-    </div>
+                </div>
                 <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
                     <button onClick={() => setIsReportModalOpen(false)} className="px-5 py-2 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-200 transition-colors">Cancelar</button>
-    </div>
-    </div>
-    </div>
+                </div>
+            </div>
+        </div>
       )}
 
       {/* COMPONENTE OCULTO PARA IMPRESIÓN */}
       <div className="absolute left-[-9999px] top-[-9999px] opacity-0 pointer-events-none" aria-hidden="true">
-        <div ref={printSorteosRef} style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+        <div ref={printSorteosRef} style={{ padding: '20px', fontFamily: 'sans-serif', backgroundColor: '#ffffff', color: '#0f172a' }}>
           <style>{`
             @media print {
               @page { size: A4 portrait; margin: 15mm; }
-              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-              table { width: 100%; border-collapse: collapse; }
-              th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 11px; text-align: left; }
-              th { background-color: #f1f5f9; font-weight: bold; text-transform: uppercase; }
+              html, body {
+                color-scheme: light !important;
+                background-color: #ffffff !important;
+                background: #ffffff !important;
+                color: #0f172a !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              table { width: 100%; border-collapse: collapse; background-color: #ffffff !important; color: #0f172a !important; }
+              th, td { border: 1px solid #cbd5e1; padding: 6px 8px; font-size: 11px; text-align: left; background-color: #ffffff !important; color: #0f172a !important; }
+              th { background-color: #f1f5f9 !important; font-weight: bold; text-transform: uppercase; }
+              tr:nth-child(even) td { background-color: #f8fafc !important; }
             }
           `}</style>
           
