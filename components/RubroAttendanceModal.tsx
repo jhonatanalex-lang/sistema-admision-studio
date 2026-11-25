@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -72,6 +72,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
   // Filters for Report tab
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('ALL');
   const [selectedPersonFilter, setSelectedPersonFilter] = useState<string>('ALL');
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Signature modal state
@@ -843,6 +844,44 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     });
   };
 
+  // Extraer grupos disponibles en este rubro
+  const availableGroups = useMemo(() => {
+    const groupsSet = new Set<string>();
+    eligibleSorteos.forEach(s => {
+      if (s.horario_data && Array.isArray(s.horario_data)) {
+        s.horario_data.forEach((shift: any) => {
+          if (shift?.grupo) groupsSet.add(shift.grupo.trim());
+        });
+      }
+    });
+    return Array.from(groupsSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [eligibleSorteos]);
+
+  // Helper para extraer información de turno y grupo de una persona
+  const getPersonScheduleInfo = useCallback((s: PersonalSorteo, dateStr?: string) => {
+    if (!s.horario_data || !Array.isArray(s.horario_data) || s.horario_data.length === 0) {
+      return { grupo: 'Sin Grupo', turno: '', ordenPersona: 999 };
+    }
+    let shift = dateStr ? s.horario_data.find((d: any) => d && d.fecha === dateStr && d.grupo) : null;
+    if (!shift) {
+      shift = s.horario_data.find((d: any) => d && d.grupo) || s.horario_data[0];
+    }
+    const grupo = shift?.grupo ? shift.grupo.trim() : 'Sin Grupo';
+    const turno = (shift?.hora_inicio && shift?.hora_fin) ? `${shift.hora_inicio} - ${shift.hora_fin}` : '';
+    const ordenPersona = typeof shift?.orden_persona === 'number' ? shift.orden_persona : 999;
+    return { grupo, turno, ordenPersona };
+  }, []);
+
+  // Conteo de integrantes por grupo
+  const groupMemberCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    eligibleSorteos.forEach(s => {
+      const info = getPersonScheduleInfo(s, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      counts[info.grupo] = (counts[info.grupo] || 0) + 1;
+    });
+    return counts;
+  }, [eligibleSorteos, selectedDateFilter, getPersonScheduleInfo]);
+
   // Extract list of unique dates from records
   const getUniqueDates = (): string[] => {
     const datesSet = new Set<string>();
@@ -900,6 +939,9 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     dni: string;
     nombre: string;
     cargo: string;
+    grupo: string;
+    turno: string;
+    ordenPersona: number;
     ingreso: string;
     salida: string;
     ingresoRecord?: RubroAttendanceRecord;
@@ -915,7 +957,14 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       ? getUniqueDates()
       : [selectedDateFilter];
 
-    let filteredPersonnel = eligibleSorteos;
+    let filteredPersonnel = [...eligibleSorteos];
+
+    if (selectedGroupFilter !== 'ALL') {
+      filteredPersonnel = filteredPersonnel.filter(s => {
+        const info = getPersonScheduleInfo(s, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+        return info.grupo === selectedGroupFilter;
+      });
+    }
 
     if (selectedPersonFilter !== 'ALL') {
       filteredPersonnel = filteredPersonnel.filter(s => s.dni === selectedPersonFilter);
@@ -927,6 +976,21 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
         s => s.nombres.toLowerCase().includes(q) || s.dni.includes(q)
       );
     }
+
+    // Ordenar rigurosamente por Grupo (Grupo 1, Grupo 2, Grupo 3), luego por orden_persona y alfabéticamente
+    filteredPersonnel.sort((a, b) => {
+      const infoA = getPersonScheduleInfo(a, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      const infoB = getPersonScheduleInfo(b, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      
+      const grpComp = infoA.grupo.localeCompare(infoB.grupo, undefined, { numeric: true });
+      if (grpComp !== 0) return grpComp;
+
+      if (infoA.ordenPersona !== infoB.ordenPersona) {
+        return infoA.ordenPersona - infoB.ordenPersona;
+      }
+
+      return a.nombres.localeCompare(b.nombres);
+    });
 
     // Precompute person totals for evaluated dates
     const personTotalsMap = new Map<string, { formatted: string; formattedFull: string }>();
@@ -974,12 +1038,17 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
 
         const totals = personTotalsMap.get(s.dni) || { formatted: '00h 00m', formattedFull: '00h 00m (0.00 hrs)' };
 
+        const schedInfo = getPersonScheduleInfo(s, dateStr);
+
         rows.push({
           num: rowCounter++,
           fecha: dateStr,
           dni: s.dni,
           nombre: s.nombres,
           cargo: s.cargo,
+          grupo: schedInfo.grupo,
+          turno: schedInfo.turno,
+          ordenPersona: schedInfo.ordenPersona,
           ingreso: ingresoRecord ? ingresoRecord.hora : '-',
           salida: salidaRecord ? salidaRecord.hora : '-',
           ingresoRecord,
@@ -1000,7 +1069,13 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     const workbook = XLSX.utils.book_new();
     const dates = selectedDateFilter === 'ALL' ? getUniqueDates() : [selectedDateFilter];
 
-    let personnel = eligibleSorteos;
+    let personnel = [...eligibleSorteos];
+    if (selectedGroupFilter !== 'ALL') {
+      personnel = personnel.filter(s => {
+        const info = getPersonScheduleInfo(s, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+        return info.grupo === selectedGroupFilter;
+      });
+    }
     if (selectedPersonFilter !== 'ALL') {
       personnel = personnel.filter(s => s.dni === selectedPersonFilter);
     }
@@ -1008,6 +1083,15 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       const q = searchQuery.toLowerCase().trim();
       personnel = personnel.filter(s => s.nombres.toLowerCase().includes(q) || s.dni.includes(q));
     }
+
+    personnel.sort((a, b) => {
+      const infoA = getPersonScheduleInfo(a, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      const infoB = getPersonScheduleInfo(b, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      const grpComp = infoA.grupo.localeCompare(infoB.grupo, undefined, { numeric: true });
+      if (grpComp !== 0) return grpComp;
+      if (infoA.ordenPersona !== infoB.ordenPersona) return infoA.ordenPersona - infoB.ordenPersona;
+      return a.nombres.localeCompare(b.nombres);
+    });
 
     // Precalculate total hours per person across evaluated dates
     const personTotalsMap = new Map<string, { formatted: string; decimalHours: string; daysAttended: number }>();
@@ -1052,9 +1136,12 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
 
         const totals = personTotalsMap.get(s.dni) || { formatted: '00h 00m', decimalHours: '0.00', daysAttended: 0 };
 
+        const schedInfo = getPersonScheduleInfo(s, dateStr);
         excelRows.push({
           'N°': rowIdx++,
           'FECHA': dateStr,
+          'GRUPO': schedInfo.grupo,
+          'TURNO': schedInfo.turno || 'Sin turno',
           'DNI': s.dni,
           'NOMBRES Y APELLIDOS': s.nombres,
           'CARGO / RUBRO': s.cargo,
@@ -1098,7 +1185,13 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
     const dates = selectedDateFilter === 'ALL' ? getUniqueDates() : [selectedDateFilter];
 
-    let personnel = eligibleSorteos;
+    let personnel = [...eligibleSorteos];
+    if (selectedGroupFilter !== 'ALL') {
+      personnel = personnel.filter(s => {
+        const info = getPersonScheduleInfo(s, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+        return info.grupo === selectedGroupFilter;
+      });
+    }
     if (selectedPersonFilter !== 'ALL') {
       personnel = personnel.filter(s => s.dni === selectedPersonFilter);
     }
@@ -1106,6 +1199,15 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
       const q = searchQuery.toLowerCase().trim();
       personnel = personnel.filter(s => s.nombres.toLowerCase().includes(q) || s.dni.includes(q));
     }
+
+    personnel.sort((a, b) => {
+      const infoA = getPersonScheduleInfo(a, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      const infoB = getPersonScheduleInfo(b, selectedDateFilter === 'ALL' ? undefined : selectedDateFilter);
+      const grpComp = infoA.grupo.localeCompare(infoB.grupo, undefined, { numeric: true });
+      if (grpComp !== 0) return grpComp;
+      if (infoA.ordenPersona !== infoB.ordenPersona) return infoA.ordenPersona - infoB.ordenPersona;
+      return a.nombres.localeCompare(b.nombres);
+    });
 
     // Precalculate total hours per person across evaluated dates
     const personTotalsMap = new Map<string, { totalMinutes: number; formatted: string; decimalHours: string; daysAttended: number }>();
@@ -1167,10 +1269,14 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
           firmaOut: salidaRecord?.firma
         });
 
+        const schedInfo = getPersonScheduleInfo(s, dateStr);
+        const displayName = schedInfo.grupo && schedInfo.grupo !== 'Sin Grupo'
+          ? `${s.nombres}\n[${schedInfo.grupo}${schedInfo.turno ? ` - ${schedInfo.turno}` : ''}]`
+          : s.nombres;
         return [
           index + 1,
           s.dni,
-          s.nombres,
+          displayName,
           ingresoRecord ? ingresoRecord.hora : '-',
           ingresoRecord?.firma ? '' : '-', // Space for image
           salidaRecord ? salidaRecord.hora : '-',
@@ -1625,7 +1731,9 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
                   <span className="text-xs font-bold text-slate-500 uppercase">Personal Sorteado</span>
-                  <span className="text-2xl font-black text-slate-900 mt-1">{eligibleSorteos.length}</span>
+                  <span className="text-2xl font-black text-slate-900 mt-1">
+                    {selectedGroupFilter === 'ALL' ? eligibleSorteos.length : eligibleSorteos.filter(s => getPersonScheduleInfo(s, todayStr).grupo === selectedGroupFilter).length}
+                  </span>
                 </div>
                 <div className="p-4 bg-white rounded-2xl border border-emerald-200 shadow-sm flex flex-col bg-emerald-50/30">
                   <span className="text-xs font-bold text-emerald-700 uppercase">Asistieron Hoy (Ingresos)</span>
@@ -1678,7 +1786,7 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                 </div>
 
                 {/* FILTER CONTROLS */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
                       Filtrar por Fecha (Día)
@@ -1692,6 +1800,27 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                       {uniqueDates.map(d => (
                         <option key={d} value={d}>
                           Asistencia del {d} {d === todayStr ? '(HOY)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1 flex items-center justify-between">
+                      <span>Filtrar por Grupo (Turno)</span>
+                      {selectedGroupFilter !== 'ALL' && (
+                        <span className="text-[9px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded">Activo</span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedGroupFilter}
+                      onChange={e => setSelectedGroupFilter(e.target.value)}
+                      className="w-full p-2.5 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-xs text-slate-800 bg-slate-50"
+                    >
+                      <option value="ALL">-- TODOS LOS GRUPOS ({availableGroups.length}) --</option>
+                      {availableGroups.map(g => (
+                        <option key={g} value={g}>
+                          {g} ({groupMemberCounts[g] || 0} personas)
                         </option>
                       ))}
                     </select>
@@ -1754,14 +1883,49 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                       </tr>
                     </thead>
                     <tbody className="text-xs text-slate-700 divide-y divide-slate-100">
-                      {filteredRows.map(row => (
-                        <tr key={`${row.fecha}_${row.dni}`} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-3.5 text-center font-mono font-bold text-slate-400">{row.num}</td>
-                          <td className="p-3.5 text-center font-mono font-bold text-indigo-900 bg-indigo-50/50 rounded-lg">{row.fecha}</td>
-                          <td className="p-3.5">
-                            <p className="font-bold text-slate-900 leading-tight">{row.nombre}</p>
-                            <p className="font-mono text-[10px] text-slate-500 mt-0.5">DNI: {row.dni}</p>
-                          </td>
+                      {filteredRows.map((row, index) => {
+                        const prevRow = index > 0 ? filteredRows[index - 1] : null;
+                        const isNewGroup = !prevRow || prevRow.grupo !== row.grupo || prevRow.fecha !== row.fecha;
+                        const hasGroups = availableGroups.length > 0 && row.grupo && row.grupo !== 'Sin Grupo';
+
+                        return (
+                          <React.Fragment key={`${row.fecha}_${row.dni}`}>
+                            {isNewGroup && hasGroups && (
+                              <tr className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border-y border-indigo-900/60 shadow-inner">
+                                <td colSpan={10} className="py-2.5 px-4">
+                                  <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <div className="flex items-center gap-2.5">
+                                      <span className="h-6 px-3 rounded-md bg-indigo-500 text-white flex items-center justify-center text-xs font-black tracking-wider uppercase shadow-sm">
+                                        {row.grupo}
+                                      </span>
+                                      {row.turno && (
+                                        <span className="text-[11px] font-bold text-indigo-200 bg-indigo-900/80 border border-indigo-700/80 px-2.5 py-0.5 rounded-md flex items-center gap-1.5 shadow-sm">
+                                          <span className="material-symbols-outlined text-[13px] text-indigo-400">schedule</span>
+                                          Turno / Horario Oficial: <strong className="text-white font-black">{row.turno}</strong>
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] font-bold text-indigo-200/90 uppercase tracking-wider bg-white/5 border border-white/10 px-2 py-0.5 rounded">
+                                      {groupMemberCounts[row.grupo] || ''} personas asignadas
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="hover:bg-slate-50 transition-colors">
+                              <td className="p-3.5 text-center font-mono font-bold text-slate-400">{row.num}</td>
+                              <td className="p-3.5 text-center font-mono font-bold text-indigo-900 bg-indigo-50/50 rounded-lg">{row.fecha}</td>
+                              <td className="p-3.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-bold text-slate-900 leading-tight">{row.nombre}</p>
+                                  {row.grupo && row.grupo !== 'Sin Grupo' && (
+                                    <span className="text-[9px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded uppercase">
+                                      {row.grupo}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="font-mono text-[10px] text-slate-500 mt-0.5">DNI: {row.dni}</p>
+                              </td>
                           <td className="p-3.5 text-center font-mono font-bold text-emerald-700 bg-emerald-50/40">{row.ingreso}</td>
                           <td className="p-3.5 text-center">
                             {row.ingresoRecord?.firma ? (
@@ -1804,7 +1968,9 @@ export const RubroAttendanceModal: React.FC<RubroAttendanceModalProps> = ({
                             </span>
                           </td>
                         </tr>
-                      ))}
+                          </React.Fragment>
+                        );
+                      })}
                       {filteredRows.length === 0 && (
                         <tr>
                           <td colSpan={10} className="p-8 text-center text-slate-400 font-bold uppercase text-xs">
